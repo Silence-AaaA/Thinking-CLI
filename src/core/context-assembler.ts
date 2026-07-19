@@ -1,29 +1,11 @@
 ﻿/**
- * Context Assembler — 上下文组装器
+ * Context Assembler v3 — 可解释 + 可回放 + 可追溯
  *
  * ============================================================
- * Phase 4 核心：组装最终送给 LLM 的消息列表
- *
- * 【设计哲学】
- * 之前：直接把 this.state.messages 丢给 LLM（原始流水账）
- * 现在：经过组装器重新组织，每部分都有明确职责
- *
- * 【组装结构】
- * ┌─────────────────────────────────────────────┐
- * │ System Prompt        → 角色 + 规则（不变）     │
- * │ Working Memory       → 当前目标 + 关键发现     │
- * │ State Snapshot       → 状态机关键字段          │
- * │ Recent History       → 最近 N 轮完整对话       │
- * │ Summary              → 早期对话的压缩版        │
- * │ Retrieved Context    → 按需获取的文件/知识      │
- * ├─────────────────────────────────────────────┤
- * │ 总量必须 < 上下文窗口                          │
- * └─────────────────────────────────────────────┘
- *
- * 【学习要点】
- * 上下文组装是"Context Engineering"的核心。
- * 不是把所有信息都塞进去，而是精心选择什么该放、什么该省。
- * 这和写好 prompt 的道理一样：信息密度 > 信息数量。
+ * Phase 4.6 升级：
+ * 1. 保留 v2 的 AssembleReport
+ * 2. 新增 history checkpoint（重大压缩时保存摘要快照）
+ * 3. 新增 context changelog（记录每次版本变化原因）
  * ============================================================
  */
 
@@ -31,22 +13,19 @@ import type { Message } from "../llm/types.js";
 import type { StateMachine } from "./state-machine.js";
 import type { WorkingMemory } from "./working-memory.js";
 import { HistoryCompressor } from "./history-compressor.js";
+import { HistoryCheckpointManager, type HistoryCheckpoint } from "./history-checkpoints.js";
+import { ContextChangelog, type ContextChangeEntry } from "./context-changelog.js";
 import { getLogger } from "../utils/logger.js";
 
-/** Context Assembler 配置 */
 export interface ContextAssemblerConfig {
-  /** 历史压缩：保留最近几轮完整对话 */
   recentRounds: number;
-  /** 触发压缩的最小轮次 */
   minRoundsToCompress: number;
-  /** 是否注入 Working Memory */
   injectWorkingMemory: boolean;
-  /** 是否注入 State Snapshot */
   injectStateSnapshot: boolean;
-  /** 上下文窗口大小估算（token） */
   contextWindowTokens: number;
-  /** 留给模型回复的空间（token） */
   reserveForResponse: number;
+  maxHistoryCheckpoints?: number;
+  maxContextChangelog?: number;
 }
 
 const DEFAULT_CONFIG: ContextAssemblerConfig = {
@@ -56,33 +35,52 @@ const DEFAULT_CONFIG: ContextAssemblerConfig = {
   injectStateSnapshot: true,
   contextWindowTokens: 128000,
   reserveForResponse: 4000,
+  maxHistoryCheckpoints: 20,
+  maxContextChangelog: 100,
 };
 
-/** 组装结果 */
-export interface AssembledContext {
-  /** 组装后的消息列表（直接送给 LLM） */
-  messages: Message[];
-  /** 统计信息 */
-  stats: {
-    totalMessages: number;
-    compressedMessages: number;
-    workingMemoryTokens: number;
-    stateSnapshotTokens: number;
-    estimatedTotalTokens: number;
-  };
+export interface AssembleReportSection {
+  name: string;
+  messageCount: number;
+  estimatedTokens: number;
+  note?: string;
 }
 
-/**
- * Context Assembler
- *
- * 【学习要点】
- * 这是 Phase 4 的核心协调者。
- * 它依赖 Working Memory 和 History Compressor，
- * 负责把各部分组装成最终送给 LLM 的消息列表。
- */
+export interface AssembleReport {
+  contextVersion: number;
+  step: number;
+  memoryVersion: number;
+  totalMessages: number;
+  estimatedTotalTokens: number;
+  compressedMessages: number;
+  droppedForBudget: number;
+  injectedMemory: boolean;
+  injectedState: boolean;
+  maxAllowedTokens: number;
+  sections: AssembleReportSection[];
+  warnings: string[];
+  changedBecause: string[];
+  checkpointCreated: boolean;
+}
+
+export interface AssembledContext {
+  messages: Message[];
+  report: AssembleReport;
+  checkpoint?: HistoryCheckpoint;
+  changelogEntry?: ContextChangeEntry;
+}
+
 export class ContextAssembler {
   private config: ContextAssemblerConfig;
   private compressor: HistoryCompressor;
+  private checkpoints = new HistoryCheckpointManager(DEFAULT_CONFIG.maxHistoryCheckpoints);
+  private changelog = new ContextChangelog(DEFAULT_CONFIG.maxContextChangelog);
+  private contextVersion = 0;
+  private lastMemoryVersion = -1;
+  private lastInjectedMemory = false;
+  private lastInjectedState = false;
+  private lastCompressedMessages = 0;
+  private lastDroppedForBudget = 0;
   private logger = getLogger();
 
   constructor(config?: Partial<ContextAssemblerConfig>) {
@@ -91,112 +89,198 @@ export class ContextAssembler {
       recentRounds: this.config.recentRounds,
       minRoundsToCompress: this.config.minRoundsToCompress,
     });
+    this.checkpoints = new HistoryCheckpointManager(this.config.maxHistoryCheckpoints ?? DEFAULT_CONFIG.maxHistoryCheckpoints);
+    this.changelog = new ContextChangelog(this.config.maxContextChangelog ?? DEFAULT_CONFIG.maxContextChangelog);
   }
 
-  /**
-   * 组装上下文
-   *
-   * @param rawMessages 原始对话历史
-   * @param workingMemory 工作记忆
-   * @param stateMachine 状态机
-   * @returns 组装后的消息列表 + 统计信息
-   */
+  get currentContextVersion(): number {
+    return this.contextVersion;
+  }
+
+  getCheckpointManager(): HistoryCheckpointManager {
+    return this.checkpoints;
+  }
+
+  getContextChangelog(): ContextChangelog {
+    return this.changelog;
+  }
+
   assemble(
     rawMessages: Message[],
     workingMemory: WorkingMemory,
-    stateMachine: StateMachine
+    stateMachine: StateMachine,
+    step?: number,
   ): AssembledContext {
+    const changedBecause: string[] = [];
+    const sections: AssembleReportSection[] = [];
+    const warnings: string[] = [];
     const parts: Message[] = [];
     let compressedCount = 0;
+    let droppedForBudget = 0;
+    let checkpointCreated = false;
+    let checkpoint: HistoryCheckpoint | undefined = undefined;
 
-    // 1. 提取 system message
     const systemMsgs = rawMessages.filter((m) => m.role === "system");
     const nonSystemMsgs = rawMessages.filter((m) => m.role !== "system");
 
-    // System Prompt 始终保留
     parts.push(...systemMsgs);
+    sections.push({
+      name: "system",
+      messageCount: systemMsgs.length,
+      estimatedTokens: this.estimateTokens(systemMsgs),
+      note: "fixed system prompt",
+    });
 
-    // 2. 注入 Working Memory（在 system prompt 之后，对话之前）
-    let wmTokens = 0;
+    let injectedMemory = false;
     if (this.config.injectWorkingMemory) {
       const wmText = workingMemory.formatForLLM();
+      const wmTokens = Math.ceil(wmText.length / 4);
       if (wmText.length > 50) {
-        // 有实质内容才注入
-        parts.push({
-          role: "user",
-          content: wmText,
+        parts.push({ role: "user", content: wmText });
+        parts.push({ role: "assistant", content: "Working memory noted. Continuing with task." });
+        injectedMemory = true;
+        sections.push({
+          name: "working_memory",
+          messageCount: 2,
+          estimatedTokens: wmTokens,
+          note: `memory version=${workingMemory.version}`,
         });
-        parts.push({
-          role: "assistant",
-          content: "Working memory noted. Continuing with task.",
+      } else {
+        sections.push({
+          name: "working_memory",
+          messageCount: 0,
+          estimatedTokens: 0,
+          note: "skipped: wm content too small",
         });
-        wmTokens = Math.ceil(wmText.length / 4);
       }
     }
 
-    // 3. 注入 State Snapshot
-    let ssTokens = 0;
+    let injectedState = false;
     if (this.config.injectStateSnapshot) {
       const snapshot = stateMachine.snapshot();
       const snapshotText = this.formatStateSnapshot(snapshot);
+      const ssTokens = Math.ceil(snapshotText.length / 4);
       if (snapshotText.length > 30) {
-        parts.push({
-          role: "user",
-          content: snapshotText,
+        parts.push({ role: "user", content: snapshotText });
+        parts.push({ role: "assistant", content: "State snapshot acknowledged." });
+        injectedState = true;
+        sections.push({
+          name: "state_snapshot",
+          messageCount: 2,
+          estimatedTokens: ssTokens,
+          note: `status=${snapshot.status}, steps=${snapshot.totalSteps}`,
         });
-        parts.push({
-          role: "assistant",
-          content: "State snapshot acknowledged.",
+      } else {
+        sections.push({
+          name: "state_snapshot",
+          messageCount: 0,
+          estimatedTokens: 0,
+          note: "skipped: snapshot content too small",
         });
-        ssTokens = Math.ceil(snapshotText.length / 4);
       }
     }
 
-    // 4. 压缩历史（如果需要）
     if (this.compressor.shouldCompress(rawMessages)) {
       const compressed = this.compressor.compress(rawMessages);
-      // 用压缩后的 recentMessages 替代原始消息
-      // （compressed.recentMessages 已经包含 system + summary + 最近轮次）
-      // 但我们已经手动加了 system 和 memory，所以只取 summary + recent 部分
-      const nonSystemRecent = compressed.recentMessages.filter(
-        (m) => m.role !== "system"
-      );
+      const nonSystemRecent = compressed.recentMessages.filter((m) => m.role !== "system");
       parts.push(...nonSystemRecent);
       compressedCount = compressed.compressedCount;
+      sections.push({
+        name: "history",
+        messageCount: nonSystemRecent.length,
+        estimatedTokens: this.estimateTokens(nonSystemRecent),
+        note: `compressed older messages; recent kept intact`,
+      });
+
+      if (compressed.summary) {
+        const estimatedRounds = Math.floor(nonSystemMsgs.length / 4);
+        checkpoint = this.checkpoints.addCheckpoint({
+          step: step ?? 0,
+          contextVersion: this.contextVersion + 1,
+          summary: compressed.summary,
+          compressedCount: compressed.compressedCount,
+          sourceRoundCount: estimatedRounds,
+        });
+        checkpointCreated = true;
+      }
+
       this.logger.info("ContextAssembler", `History compressed: ${compressedCount} messages`);
     } else {
-      // 不需要压缩，直接用原始消息（排除 system，已在前面加过）
       parts.push(...nonSystemMsgs);
+      sections.push({
+        name: "history",
+        messageCount: nonSystemMsgs.length,
+        estimatedTokens: this.estimateTokens(nonSystemMsgs),
+        note: "no compression needed",
+      });
     }
 
-    // 5. 总量检查
-    const estimatedTokens = this.estimateTokens(parts);
+    const estimatedBefore = this.estimateTokens(parts);
     const maxAllowed = this.config.contextWindowTokens - this.config.reserveForResponse;
 
-    if (estimatedTokens > maxAllowed) {
-      this.logger.warn(
-        "ContextAssembler",
-        `Context too large: ${estimatedTokens} tokens > ${maxAllowed} limit. Truncating.`
-      );
-      // 简单策略：移除最早的消息（保留 system + memory）
-      this.truncateToFit(parts, maxAllowed);
+    if (estimatedBefore > maxAllowed) {
+      warnings.push(`context exceeded before truncation: ${estimatedBefore} > ${maxAllowed}`);
+      droppedForBudget = this.truncateToFit(parts, maxAllowed);
+      warnings.push(`dropped ${droppedForBudget} messages to fit budget`);
     }
+
+    const memoryVersion = workingMemory.version;
+    if (memoryVersion !== this.lastMemoryVersion) changedBecause.push(`memory_version_changed:${this.lastMemoryVersion}->${memoryVersion}`);
+    if (injectedMemory !== this.lastInjectedMemory) changedBecause.push(`injected_memory:${this.lastInjectedMemory}->${injectedMemory}`);
+    if (injectedState !== this.lastInjectedState) changedBecause.push(`injected_state:${this.lastInjectedState}->${injectedState}`);
+    if (compressedCount !== this.lastCompressedMessages) changedBecause.push(`compressed_messages:${this.lastCompressedMessages}->${compressedCount}`);
+    if (droppedForBudget !== this.lastDroppedForBudget) changedBecause.push(`dropped_for_budget:${this.lastDroppedForBudget}->${droppedForBudget}`);
+    if (changedBecause.length === 0 && this.contextVersion === 0) {
+      changedBecause.push("initial_assembly");
+    } else if (changedBecause.length === 0) {
+      changedBecause.push("no_major_change");
+    }
+
+    this.contextVersion++;
+    const finalTokens = this.estimateTokens(parts);
+
+    const changelogEntry = this.changelog.addEntry({
+      contextVersion: this.contextVersion,
+      step: step ?? 0,
+      memoryVersion,
+      stateSnapshotStatus: stateMachine.snapshot().status,
+      injectedMemory,
+      injectedState,
+      compressedMessages: compressedCount,
+      droppedForBudget,
+      estimatedTotalTokens: finalTokens,
+      changedBecause,
+    });
+
+    this.lastMemoryVersion = memoryVersion;
+    this.lastInjectedMemory = injectedMemory;
+    this.lastInjectedState = injectedState;
+    this.lastCompressedMessages = compressedCount;
+    this.lastDroppedForBudget = droppedForBudget;
 
     return {
       messages: parts,
-      stats: {
+      report: {
+        contextVersion: this.contextVersion,
+        step: step ?? 0,
+        memoryVersion,
         totalMessages: parts.length,
+        estimatedTotalTokens: finalTokens,
         compressedMessages: compressedCount,
-        workingMemoryTokens: wmTokens,
-        stateSnapshotTokens: ssTokens,
-        estimatedTotalTokens: this.estimateTokens(parts),
+        droppedForBudget,
+        injectedMemory,
+        injectedState,
+        maxAllowedTokens: maxAllowed,
+        sections,
+        warnings,
+        changedBecause,
+        checkpointCreated,
       },
+      checkpoint,
+      changelogEntry,
     };
   }
 
-  /**
-   * 格式化状态快照为 LLM 可读文本
-   */
   private formatStateSnapshot(snapshot: ReturnType<StateMachine["snapshot"]>): string {
     const lines: string[] = ["## Execution State"];
 
@@ -208,7 +292,9 @@ export class ContextAssembler {
     }
 
     if (snapshot.reflections.length > 0) {
-      lines.push(`Reflections: ${snapshot.reflections.length} (last: ${snapshot.reflections[snapshot.reflections.length - 1].newStrategy})`);
+      lines.push(
+        `Reflections: ${snapshot.reflections.length} (last: ${snapshot.reflections[snapshot.reflections.length - 1].newStrategy})`,
+      );
     }
 
     if (snapshot.failedSteps.length > 0) {
@@ -222,9 +308,6 @@ export class ContextAssembler {
     return lines.join("\n");
   }
 
-  /**
-   * 估算消息列表的 token 数
-   */
   private estimateTokens(messages: Message[]): number {
     let totalChars = 0;
     for (const msg of messages) {
@@ -238,24 +321,19 @@ export class ContextAssembler {
     return Math.ceil(totalChars / 4);
   }
 
-  /**
-   * 截断消息列表以适应 token 限制
-   *
-   * 【策略】
-   * 从最早的消息开始移除（保留 system + 最近消息）
-   * 不动前 2 条（通常是 system prompt）
-   */
-  private truncateToFit(messages: Message[], maxTokens: number): void {
-    // 保留前 2 条（system + memory）
+  private truncateToFit(messages: Message[], maxTokens: number): number {
+    let dropped = 0;
+
     while (this.estimateTokens(messages) > maxTokens && messages.length > 4) {
-      // 找到第 3 条非 system 消息并移除
       const idx = messages.findIndex((m, i) => i >= 2 && m.role !== "system");
       if (idx >= 0 && idx < messages.length - 2) {
         messages.splice(idx, 1);
+        dropped++;
       } else {
         break;
       }
     }
+
+    return dropped;
   }
 }
-

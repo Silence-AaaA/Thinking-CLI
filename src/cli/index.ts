@@ -2,10 +2,11 @@
 
 /**
  * Thinking Agent - CLI 入口
- * 
+ *
  * Phase 3 (审批): --no-approval 模式 / audit / stats
  * Phase 3 (执行): exec 命令查看执行引擎状态
- * 
+ * Phase 4.6: wm / ctx / metrics / ctxdiff
+ *
  * 【v2 修复】审批确认不再创建新的 readline，复用 REPL 的 rl
  * 防止 "y" 被 REPL 捕获当成新的用户任务
  */
@@ -31,7 +32,7 @@ const program = new Command();
 program
   .name("thinking-agent")
   .description("A CLI coding agent built for learning Agent architecture")
-  .version("0.3.1");
+  .version("0.4.6");
 
 program
   .argument("[task]", "Task to execute (omit for REPL mode)")
@@ -44,8 +45,8 @@ program
   .action(async (task: string | undefined, options) => {
     const logLevel = options.verbose ? LogLevel.DEBUG : LogLevel.INFO;
     const logger = initLogger(logLevel, options.logDir);
-    
-    logger.info("CLI", "Initializing Thinking Agent v0.3.1");
+
+    logger.info("CLI", "Initializing Thinking Agent v0.4.6 (Runtime Metrics + Context Checkpoints)");
 
     const registry = new ToolRegistry();
     [...fileTools, ...searchTools, ...shellTools, ...gitTools].forEach(tool => {
@@ -57,7 +58,7 @@ program
     logger.info("CLI", `Model: ${options.model}`);
 
     const enableApproval = options.approval !== false;
-    
+
     if (options.repl || !task) {
       await startREPL(llm, registry, { enableApproval, logger, options });
     } else {
@@ -65,77 +66,31 @@ program
     }
   });
 
-/**
- * 创建 Agent 实例
- */
 function createAgent(
   llm: OpenAIAdapter,
   registry: ToolRegistry,
-  opts: { enableApproval: boolean; options: Record<string, unknown>; onConfirm?: (toolCall: ToolCall, assessment: { level: RiskLevel; reason: string; risks: string[] }) => Promise<boolean> }
+  opts: {
+    enableApproval: boolean;
+    options: Record<string, unknown>;
+    onConfirm?: (toolCall: ToolCall, assessment: { level: RiskLevel; reason: string; risks: string[] }) => Promise<boolean>;
+  }
 ): Agent {
   return new Agent(llm, registry, {
-    maxIterations: parseInt(opts.options["maxIterations"] as string ?? "20"),
-    showThinking: opts.options["verbose"] as boolean ?? false,
+    maxIterations: parseInt((opts.options["maxIterations"] as string) ?? "20"),
+    showThinking: (opts.options["verbose"] as boolean) ?? false,
     enableApproval: opts.enableApproval,
     onConfirm: opts.onConfirm,
   });
 }
 
-/**
- * 【修复】用指定的 rl 做确认输入，不再创建新的 readline
- * 
- * 核心技巧：暂停 REPL 的 line 监听器，等确认完成后再恢复。
- * 这样 "y" 不会被 REPL 捕获。
- */
 function askUserVia(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => {
-    // 暂停 rl 的自动 prompt 和 line 事件处理
     const originalPrompt = rl.getPrompt();
-    
     rl.question(question, (answer) => {
-      // 恢复 REPL 的 prompt
       rl.setPrompt(originalPrompt);
       resolve(answer.trim());
     });
   });
-}
-
-async function executeTask(
-  llm: OpenAIAdapter,
-  registry: ToolRegistry,
-  task: string,
-  opts: { enableApproval: boolean; logger: ReturnType<typeof initLogger>; options: Record<string, unknown> }
-): Promise<void> {
-  opts.logger.info("CLI", `Task: ${task}`);
-  console.log("\n🤔 Thinking...\n");
-
-  // 单次任务模式下用简单的 stdin 确认
-  const onConfirm = async (
-    toolCall: ToolCall,
-    assessment: { level: RiskLevel; reason: string; risks: string[] }
-  ): Promise<boolean> => {
-    printConfirmation(toolCall, assessment);
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const answer = await new Promise<string>((resolve) => {
-      rl.question("Allow? (y/n): ", (a) => { rl.close(); resolve(a.trim()); });
-    });
-    return answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
-  };
-
-  const agent = createAgent(llm, registry, { 
-    enableApproval: opts.enableApproval, 
-    options: opts.options,
-    onConfirm,
-  });
-
-  try {
-    const result = await agent.run(task);
-    console.log("\n📝 Result:\n");
-    console.log(result);
-  } catch (error) {
-    console.error("\n❌ Error:", error instanceof Error ? error.message : String(error));
-    process.exit(1);
-  }
 }
 
 function printConfirmation(toolCall: ToolCall, assessment: { level: RiskLevel; reason: string; risks: string[] }) {
@@ -153,6 +108,47 @@ function printConfirmation(toolCall: ToolCall, assessment: { level: RiskLevel; r
   console.log("=".repeat(60));
 }
 
+async function executeTask(
+  llm: OpenAIAdapter,
+  registry: ToolRegistry,
+  task: string,
+  opts: { enableApproval: boolean; logger: ReturnType<typeof initLogger>; options: Record<string, unknown> }
+): Promise<void> {
+  opts.logger.info("CLI", `Task: ${task}`);
+  console.log("\n🤔 Thinking...\n");
+
+  const onConfirm = async (
+    toolCall: ToolCall,
+    assessment: { level: RiskLevel; reason: string; risks: string[] }
+  ): Promise<boolean> => {
+    printConfirmation(toolCall, assessment);
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const answer = await new Promise<string>((resolve) => {
+      rl.question("Allow? (y/n): ", (a) => {
+        rl.close();
+        resolve(a.trim());
+      });
+    });
+    return answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
+  };
+
+  const agent = createAgent(llm, registry, {
+    enableApproval: opts.enableApproval,
+    options: opts.options,
+    onConfirm,
+  });
+
+  try {
+    const result = await agent.run(task);
+    console.log("\n📝 Result:\n");
+    console.log(result);
+    printRunMetrics(agent);
+  } catch (error) {
+    console.error("\n❌ Error:", error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
 async function startREPL(
   llm: OpenAIAdapter,
   registry: ToolRegistry,
@@ -164,19 +160,15 @@ async function startREPL(
     prompt: "You> ",
   });
 
-  // 【修复核心】审批确认复用同一个 rl
   let isConfirming = false;
-  
+
   const onConfirm = async (
     toolCall: ToolCall,
     assessment: { level: RiskLevel; reason: string; risks: string[] }
   ): Promise<boolean> => {
     isConfirming = true;
     printConfirmation(toolCall, assessment);
-    
-    // 直接用 REPL 的 rl 做确认输入
     const answer = await askUserVia(rl, "Allow? (y/n): ");
-    
     isConfirming = false;
     return answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
   };
@@ -187,19 +179,15 @@ async function startREPL(
     onConfirm,
   });
 
-  console.log("\n🤖 Thinking Agent REPL v0.3.1");
-  console.log("Commands: 'exit' | 'reset' | 'state' | 'exec' | 'wm' | 'ctx' | 'audit' | 'stats'\n");
+  console.log("\n🤖 Thinking Agent REPL v0.4.6");
+  console.log("Commands: 'exit' | 'reset' | 'state' | 'exec' | 'wm' | 'ctx' | 'metrics' | 'ctxdiff' | 'audit' | 'stats'\n");
 
   rl.prompt();
 
   rl.on("line", async (line: string) => {
     const input = line.trim();
 
-    // 【修复】如果正在确认审批，忽略这行输入
-    if (isConfirming) {
-      return;
-    }
-
+    if (isConfirming) return;
     if (!input) {
       rl.prompt();
       return;
@@ -250,6 +238,110 @@ async function startREPL(
       return;
     }
 
+    if (input === "wm") {
+      const wm = agent.getWorkingMemory().snapshot();
+      console.log("\n🧠 Working Memory:");
+      console.log(`  Version: ${wm.version}`);
+      console.log(`  Goal: ${wm.currentGoal || "(none)"}`);
+      console.log(`  Step: ${wm.currentStep}`);
+      if (wm.activeFiles.length > 0) console.log(`  Active Files: ${wm.activeFiles.join(", ")}`);
+      if (wm.findings.length > 0) {
+        console.log(`  Findings (${wm.findings.length}):`);
+        wm.findings
+          .slice()
+          .sort((a, b) => b.strength - a.strength || b.confidence - a.confidence)
+          .slice(-8)
+          .reverse()
+          .forEach(f => {
+            const src = f.source.toolName ?? f.source.kind;
+            console.log(`    [${f.importance}|str=${f.strength}|conf=${f.confidence.toFixed(2)}|src=${src}|step=${f.lastSeenStep}] ${f.content.slice(0, 90)}`);
+          });
+      }
+      if (wm.recentErrors.length > 0) {
+        console.log(`  Recent Errors:`);
+        wm.recentErrors.forEach(e => console.log(`    - ${e}`));
+      }
+      if (wm.decisions.length > 0) {
+        console.log(`  Decisions:`);
+        wm.decisions.slice(-5).forEach(d => console.log(`    - ${d}`));
+      }
+      console.log();
+      rl.prompt();
+      return;
+    }
+
+    if (input === "ctx") {
+      const assembled = agent.getContextAssembler().assemble(
+        agent.getState().messages,
+        agent.getWorkingMemory(),
+        agent.getStateMachine(),
+        agent.getState().currentStep
+      );
+      const r = assembled.report;
+      console.log("\n📐 Context Assembly Report:");
+      console.log(`  Context Version: ${r.contextVersion}`);
+      console.log(`  Memory Version: ${r.memoryVersion}`);
+      console.log(`  Step: ${r.step}`);
+      console.log(`  Checkpoint Created: ${r.checkpointCreated}`);
+      console.log(`  Total Messages: ${r.totalMessages}`);
+      console.log(`  Estimated Tokens: ${r.estimatedTotalTokens}`);
+      console.log(`  Max Allowed Tokens: ${r.maxAllowedTokens}`);
+      console.log(`  Compressed Messages: ${r.compressedMessages}`);
+      console.log(`  Dropped For Budget: ${r.droppedForBudget}`);
+      console.log(`  Injected Memory: ${r.injectedMemory}`);
+      console.log(`  Injected State: ${r.injectedState}`);
+      if (r.sections.length > 0) {
+        console.log(`  Sections:`);
+        r.sections.forEach(s => {
+          console.log(`    - ${s.name}: msgs=${s.messageCount}, tokens=${s.estimatedTokens}${s.note ? `, ${s.note}` : ""}`);
+        });
+      }
+      if (r.changedBecause.length > 0) {
+        console.log(`  Changed Because:`);
+        r.changedBecause.forEach(w => console.log(`    - ${w}`));
+      }
+      if (r.warnings.length > 0) {
+        console.log(`  Warnings:`);
+        r.warnings.forEach(w => console.log(`    - ${w}`));
+      }
+      console.log();
+      rl.prompt();
+      return;
+    }
+
+    if (input === "metrics") {
+      printRunMetrics(agent);
+      console.log();
+      rl.prompt();
+      return;
+    }
+
+    if (input === "ctxdiff") {
+      const changelog = agent.getContextAssembler().getContextChangelog();
+      const entries = changelog.list();
+      if (entries.length < 2) {
+        console.log("\n📐 Context Diff: not enough versions yet");
+      } else {
+        const from = entries[entries.length - 2];
+        const to = entries[entries.length - 1];
+        const diff = changelog.diffVersions(from.contextVersion, to.contextVersion);
+        console.log("\n📐 Context Diff (last two versions):");
+        console.log(`  From Version: ${from.contextVersion} (step=${from.step})`);
+        console.log(`  To Version:   ${to.contextVersion} (step=${to.step})`);
+        console.log(`  Token Delta: ${diff.tokenDelta ?? 0}`);
+        console.log(`  Compressed Delta: ${diff.compressedDelta ?? 0}`);
+        console.log(`  Dropped Delta: ${diff.droppedDelta ?? 0}`);
+        console.log(`  Memory Delta: ${diff.memoryDelta ?? 0}`);
+        if ((diff.changedBecause ?? []).length > 0) {
+          console.log(`  Changed Because:`);
+          (diff.changedBecause ?? []).forEach(w => console.log(`    - ${w}`));
+        }
+      }
+      console.log();
+      rl.prompt();
+      return;
+    }
+
     if (input === "audit") {
       const log = agent.getGateway().getAuditLog();
       console.log("\n📋 Audit Log:");
@@ -291,6 +383,7 @@ async function startREPL(
       const result = await agent.run(input);
       console.log("\n📝 Result:\n");
       console.log(result);
+      printRunMetrics(agent);
       console.log();
     } catch (error) {
       console.error("\n❌ Error:", error instanceof Error ? error.message : String(error));
@@ -303,3 +396,32 @@ async function startREPL(
 
 program.parse();
 
+function printRunMetrics(agent: Agent) {
+  const m = agent.getLastRunMetrics()?.currentSnapshot();
+  if (!m) return;
+  console.log("\n📊 Run Metrics:");
+  console.log(`  Run ID: ${m.runId}`);
+  console.log(`  Status: ${m.finalStatus}`);
+  console.log(`  Loops: ${m.loops}`);
+  console.log(`  Tool Calls: ${m.toolCalls}`);
+  console.log(`  Retries: ${m.retries}`);
+  console.log(`  Reflections: ${m.reflections}`);
+  console.log(`  Prompt Tokens: ${m.promptTokens}`);
+  console.log(`  Completion Tokens: ${m.completionTokens}`);
+  console.log(`  Total Tokens: ${m.totalTokens}`);
+  console.log(`  Context Compressed Messages: ${m.compressions}`);
+  console.log(`  Context Dropped Messages: ${m.contextDroppedMessages}`);
+  console.log(`  Context Versions: ${m.contextVersions}`);
+  console.log(`  WM Version Start->End: ${m.workingMemoryVersionStart} -> ${m.workingMemoryVersionEnd}`);
+  if (m.durationMs != null) console.log(`  Duration: ${m.durationMs} ms`);
+  const failures = Object.entries(m.failureCategories ?? {}).filter(([,v]) => (v as number) > 0);
+  if (failures.length > 0) {
+    console.log(`  Failure Categories:`);
+    failures.forEach(([k, v]) => console.log(`    - ${k}: ${v}`));
+  }
+  const tools = Object.entries(m.toolUsage ?? {}).sort((a,b) => (b[1] as number) - (a[1] as number)).slice(0,8);
+  if (tools.length > 0) {
+    console.log(`  Top Tools:`);
+    tools.forEach(([k, v]) => console.log(`    - ${k}: ${v}`));
+  }
+}

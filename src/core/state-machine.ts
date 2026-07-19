@@ -16,6 +16,9 @@
  * - recovering: 正在执行恢复策略
  * - completed: 任务完成
  * - failed: 任务彻底失败
+ *
+ * Phase 4.7:
+ * - 新增 loadSnapshot 方法，支持从快照恢复状态
  * ============================================================
  */
 
@@ -121,11 +124,11 @@ export class StateMachine {
     if (!allowed.includes(newStatus)) {
       this.logger.warn(
         "StateMachine",
-        `Illegal transition: ${this._status} → ${newStatus}. Allowed: [${allowed.join(", ")}]`
+        `Illegal transition: ${this._status} -> ${newStatus}. Allowed: [${allowed.join(", ")}]`
       );
       return false;
     }
-    this.logger.info("StateMachine", `Transition: ${this._status} → ${newStatus}`);
+    this.logger.info("StateMachine", `Transition: ${this._status} -> ${newStatus}`);
     this._status = newStatus;
     return true;
   }
@@ -144,7 +147,7 @@ export class StateMachine {
     const path = record.arguments.path as string | undefined;
     if (path) this._activeFiles.add(path);
 
-    this.logger.info("StateMachine", `Step ${step.id}: ${step.toolName} → ${step.success ? "OK" : "FAIL"}`);
+    this.logger.info("StateMachine", `Step ${step.id}: ${step.toolName} -> ${step.success ? "OK" : "FAIL"}`);
     return step;
   }
 
@@ -180,7 +183,7 @@ export class StateMachine {
   addReflection(record: Omit<ReflectionRecord, "timestamp">): void {
     const entry: ReflectionRecord = { ...record, timestamp: Date.now() };
     this._reflections.push(entry);
-    this.logger.info("StateMachine", `Reflection: ${entry.trigger} → ${entry.newStrategy}`);
+    this.logger.info("StateMachine", `Reflection: ${entry.trigger} -> ${entry.newStrategy}`);
   }
 
   /** 获取快照（只读） */
@@ -196,6 +199,20 @@ export class StateMachine {
       activeFiles: [...this._activeFiles],
       budgetUsed: { ...this._budgetUsed },
     };
+  }
+
+  /** 从快照恢复状态（用于 checkpoint/resume） */
+  loadSnapshot(snap: StateSnapshot): void {
+    this._status = snap.status;
+    this._currentGoal = snap.currentGoal;
+    this._completedSteps = snap.completedSteps.map((s) => ({ ...s }));
+    this._failedSteps = snap.failedSteps.map((s) => ({ ...s }));
+    this._retryCount = snap.retryCount;
+    this._stepCounter = snap.totalSteps;
+    this._reflections = snap.reflections.map((r) => ({ ...r }));
+    this._activeFiles = new Set(snap.activeFiles);
+    this._budgetUsed = { ...snap.budgetUsed };
+    this.logger.info("StateMachine", `Loaded snapshot: ${snap.status}, step=${snap.totalSteps}`);
   }
 
   /** 重置（新一轮对话） */

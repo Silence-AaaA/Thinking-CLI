@@ -1,11 +1,11 @@
 ﻿/**
  * Agent Core - ReAct 循环实现
- * 
+ *
  * ============================================================
  * Phase 1: ReAct 循环 + 循环控制 + Doom Loop
  * Phase 2: 审批网关 + Observation Layer
  * Phase 3: State Machine + Error Taxonomy + Reflection
- * Phase 4: Working Memory + Context Assembler
+ * Phase 4.6: Runtime Metrics + Context History Checkpoints
  * ============================================================
  */
 
@@ -16,9 +16,10 @@ import { ApprovalGateway, type ApprovalCallback } from "./approval-gateway.js";
 import { ObservationManager } from "./observation.js";
 import { StateMachine, ExecutionStatus } from "./state-machine.js";
 import { ErrorTaxonomy, RecoveryAction } from "./error-taxonomy.js";
-import { ReflectionEngine } from "./reflection.js";
+import { ReflectionEngine, type ReflectionJSON } from "./reflection.js";
 import { WorkingMemory } from "./working-memory.js";
 import { ContextAssembler } from "./context-assembler.js";
+import { RuntimeMetrics } from "./runtime-metrics.js";
 import { getLogger } from "../utils/logger.js";
 
 export interface AgentConfig {
@@ -101,6 +102,32 @@ class DoomLoopDetector {
   }
 }
 
+
+/** 运行时快照 — 支持 checkpoint / resume / replay */
+export interface RuntimeSnapshot {
+  agentState: AgentState;
+  stateMachine: ReturnType<StateMachine["snapshot"]>;
+  workingMemory: ReturnType<WorkingMemory["snapshot"]>;
+  reflection: ReflectionJSON;
+  timestamp: number;
+}
+
+/** 运行报告 — 标准化输出，方便评估体系 */
+export interface RunReport {
+  goal: string;
+  finalStatus: string;
+  startedAt: number;
+  finishedAt: number;
+  durationMs: number;
+  steps: number;
+  tokens: number;
+  toolCalls: number;
+  retries: number;
+  reflections: number;
+  toolUsage: Record<string, number>;
+  failureCategories: Record<string, number>;
+  warnings: string[];
+}
 export class Agent {
   private llm: LLMAdapter;
   private tools: ToolRegistry;
@@ -114,6 +141,7 @@ export class Agent {
   private config: Required<AgentConfig>;
   private state: AgentState;
   private doomLoopDetector: DoomLoopDetector;
+  private lastRunMetrics?: RuntimeMetrics;
   private logger = getLogger();
 
   constructor(llm: LLMAdapter, tools: ToolRegistry, config?: AgentConfig) {
@@ -163,22 +191,37 @@ export class Agent {
   async run(userMessage: string): Promise<string> {
     this.state.messages.push({ role: "user", content: userMessage });
 
-    // Phase 3 + 4: 设置目标
     this.stateMachine.setGoal(userMessage);
     this.workingMemory.setGoal(userMessage);
+    this.lastRunMetrics = new RuntimeMetrics(userMessage, this.workingMemory.version);
     this.stateMachine.transition(ExecutionStatus.EXECUTING);
 
     for (let i = 0; i < this.config.maxIterations; i++) {
       this.state.currentStep++;
+      this.lastRunMetrics.markLoop();
       this.logger.info("Agent", `Step ${this.state.currentStep}/${this.config.maxIterations}`);
 
-      // Phase 4: 通过 Context Assembler 组装上下文
+      this.workingMemory.setCurrentStep(this.state.currentStep);
+      this.workingMemory.tickStep(this.state.currentStep);
+
       const assembled = this.contextAssembler.assemble(
         this.state.messages,
         this.workingMemory,
-        this.stateMachine
+        this.stateMachine,
+        this.state.currentStep
       );
-      this.logger.info("ContextAssembler", `Messages: ${assembled.stats.totalMessages}, Tokens: ~${assembled.stats.estimatedTotalTokens}, Compressed: ${assembled.stats.compressedMessages}`);
+
+      this.lastRunMetrics.recordContextReport({
+        compressedMessages: assembled.report.compressedMessages,
+        droppedForBudget: assembled.report.droppedForBudget,
+        contextVersion: assembled.report.contextVersion,
+      });
+      this.lastRunMetrics.setWorkingMemoryVersion(this.workingMemory.version);
+      this.lastRunMetrics.setTotalSteps(this.stateMachine.snapshot().totalSteps);
+      this.logger.info(
+        "ContextAssembler",
+        `ctx=${assembled.report.contextVersion}, msgs=${assembled.report.totalMessages}, tokens=${assembled.report.estimatedTotalTokens}, compressed=${assembled.report.compressedMessages}, dropped=${assembled.report.droppedForBudget}`
+      );
 
       const response = await this.llm.chat(
         assembled.messages,
@@ -188,16 +231,20 @@ export class Agent {
       if (response.usage) {
         this.state.totalTokens += response.usage.totalTokens;
         this.stateMachine.addTokens(response.usage.totalTokens);
+        this.lastRunMetrics.recordUsage(
+          response.usage.promptTokens ?? 0,
+          response.usage.completionTokens ?? 0,
+          response.usage.totalTokens
+        );
         this.logger.info("Agent", `Tokens: +${response.usage.totalTokens} (total: ${this.state.totalTokens})`);
       }
 
       if (response.toolCalls.length === 0) {
         this.logger.info("Agent", "Task completed");
         this.stateMachine.transition(ExecutionStatus.COMPLETED);
-        this.state.messages.push({
-          role: "assistant",
-          content: response.content,
-        });
+        this.state.messages.push({ role: "assistant", content: response.content });
+        this.lastRunMetrics.setFinalStatus("completed");
+        this.lastRunMetrics.finish("completed");
         return response.content;
       }
 
@@ -212,6 +259,7 @@ export class Agent {
       });
 
       for (const toolCall of response.toolCalls) {
+        this.lastRunMetrics.recordToolCall(toolCall.name);
         this.logger.info("Agent", `Tool: ${toolCall.name}`, toolCall.arguments);
 
         const startTime = Date.now();
@@ -222,16 +270,17 @@ export class Agent {
           tokenEstimate: result.tokenEstimate,
         });
 
-        // Doom Loop 检测
         const isDoomLoop = this.doomLoopDetector.record(toolCall, result.success);
         if (isDoomLoop) {
+          this.lastRunMetrics.setFinalStatus("doom_loop");
+          this.lastRunMetrics.finish("doom_loop");
           this.stateMachine.transition(ExecutionStatus.FAILED);
           const errorMsg = `Doom loop detected: "${toolCall.name}" failed ${this.config.doomLoopThreshold} times. Stopping.`;
           this.logger.warn("Agent", errorMsg);
           this.state.messages.push({
             role: "tool",
             tool_call_id: toolCall.id,
-            content: JSON.stringify({ 
+            content: JSON.stringify({
               error: errorMsg,
               instruction: "STOP. Do not retry this tool. Tell the user what went wrong."
             }),
@@ -245,8 +294,6 @@ export class Agent {
           result: result.data || result.error,
         });
 
-        // === Phase 3: State Machine + Error Taxonomy + Reflection ===
-
         if (result.success) {
           this.stateMachine.recordStep({
             toolName: toolCall.name,
@@ -258,18 +305,24 @@ export class Agent {
           this.stateMachine.resetRetry();
           this.reflectionEngine.recordOutcome(toolCall.name, true);
 
-          // Phase 4: 更新 Working Memory
+          const filePath = (toolCall.arguments.path as string) ?? undefined;
           this.workingMemory.addFinding({
-            content: `Tool ${toolCall.name} succeeded`,
-            source: toolCall.name,
-            file: (toolCall.arguments.path as string) ?? undefined,
+            content: `Tool ${toolCall.name} succeeded${filePath ? ` for ${filePath}` : ""}`,
+            source: { kind: "tool", toolName: toolCall.name, toolCallId: toolCall.id, stepId: this.state.currentStep, filePath },
+            file: filePath,
             importance: "low",
+            confidence: 0.78,
+            strength: 8,
+            tags: [toolCall.name, filePath ?? ""].filter(Boolean),
           });
-          const filePath = toolCall.arguments.path as string | undefined;
-          if (filePath) this.workingMemory.addActiveFile(filePath);
+          if (filePath) {
+            this.workingMemory.addActiveFile(filePath);
+            this.workingMemory.reinforceByFile(filePath, 1);
+          }
         } else {
           const classification = this.errorTaxonomy.classify(toolCall, result);
           const recovery = this.errorTaxonomy.getRecoveryPlan(classification, 0);
+          this.lastRunMetrics.recordFailureCategory(classification.type);
 
           this.stateMachine.recordFailure({
             toolName: toolCall.name,
@@ -280,10 +333,19 @@ export class Agent {
           });
           this.reflectionEngine.recordOutcome(toolCall.name, false);
 
-          // Phase 4: 更新 Working Memory
-          this.workingMemory.addError(`${toolCall.name}: ${classification.type}`);
+          const failPath = (toolCall.arguments.path as string) ?? undefined;
+          this.workingMemory.addError(`${toolCall.name}: ${classification.type}${failPath ? ` (${failPath})` : ""}`);
+          this.workingMemory.addFinding({
+            content: `${toolCall.name} failed with ${classification.type}`,
+            source: { kind: "observation", toolName: toolCall.name, toolCallId: toolCall.id, stepId: this.state.currentStep, filePath: failPath },
+            file: failPath,
+            importance: "medium",
+            confidence: 0.76,
+            strength: 9,
+            tags: ["failure", toolCall.name, classification.type],
+          });
+          if (failPath) this.workingMemory.demoteByFile(failPath, 2);
 
-          // 检查是否需要反思
           const snapshot = this.stateMachine.snapshot();
           const reflection = this.reflectionEngine.check(snapshot, {
             type: classification.type,
@@ -291,6 +353,7 @@ export class Agent {
           });
 
           if (reflection.shouldReflect && reflection.promptForLLM) {
+            this.lastRunMetrics.recordReflection();
             this.logger.warn("Agent", `Reflection triggered: ${reflection.trigger}`);
             this.stateMachine.transition(ExecutionStatus.REFLECTING);
             this.stateMachine.addReflection({
@@ -308,17 +371,16 @@ export class Agent {
           }
 
           if (recovery.action !== RecoveryAction.ABORT) {
+            this.lastRunMetrics.recordRetry();
             this.logger.info("Agent", `Recovery: ${recovery.action} — ${recovery.hintForLLM}`);
             this.stateMachine.incrementRetry();
           }
         }
 
-        // 通过 Observation 层提取结构化观察
         const observation = this.observer.observe(toolCall, result);
         let outputStr = this.observer.formatForLLM(observation);
         outputStr = this.truncateToolOutput(outputStr, this.config.maxToolOutputChars);
 
-        // Phase 3: 失败时附加恢复策略提示
         if (!result.success) {
           const classification = this.errorTaxonomy.classify(toolCall, result);
           const recovery = this.errorTaxonomy.getRecoveryPlan(classification, this.stateMachine.snapshot().retryCount);
@@ -335,18 +397,20 @@ export class Agent {
       }
     }
 
-    // 达到最大循环次数
+    this.lastRunMetrics.setFinalStatus("max_iterations");
+    this.lastRunMetrics.finish("max_iterations");
     this.stateMachine.transition(ExecutionStatus.FAILED);
     this.state.messages.push({
       role: "user",
       content: "You have reached the maximum number of steps. Please summarize what you have done so far and what remains unfinished.",
     });
-    
+
     try {
       const finalAssembled = this.contextAssembler.assemble(
         this.state.messages,
         this.workingMemory,
-        this.stateMachine
+        this.stateMachine,
+        this.state.currentStep
       );
       const finalResponse = await this.llm.chat(finalAssembled.messages, []);
       return finalResponse.content || `Reached maximum iterations (${this.config.maxIterations}).`;
@@ -375,14 +439,16 @@ export class Agent {
     return this.reflectionEngine;
   }
 
-  /** Phase 4: 获取工作记忆 */
   getWorkingMemory(): WorkingMemory {
     return this.workingMemory;
   }
 
-  /** Phase 4: 获取上下文组装器 */
   getContextAssembler(): ContextAssembler {
     return this.contextAssembler;
+  }
+
+  getLastRunMetrics(): RuntimeMetrics | undefined {
+    return this.lastRunMetrics;
   }
 
   reset(): void {
@@ -398,5 +464,58 @@ export class Agent {
     this.stateMachine.reset();
     this.reflectionEngine.reset();
     this.workingMemory.reset();
+    this.lastRunMetrics = undefined;
+  }
+
+  /** 创建运行时快照（支持 checkpoint / resume / replay） */
+  snapshot(): RuntimeSnapshot {
+    return {
+      agentState: {
+        messages: this.state.messages.map((m) => ({ ...m })),
+        currentStep: this.state.currentStep,
+        totalTokens: this.state.totalTokens,
+        toolCallHistory: this.state.toolCallHistory.map((h) => ({ ...h })),
+      },
+      stateMachine: this.stateMachine.snapshot(),
+      workingMemory: this.workingMemory.snapshot(),
+      reflection: this.reflectionEngine.toJSON(),
+      timestamp: Date.now(),
+    };
+  }
+
+  /** 从快照恢复状态（支持 checkpoint / resume） */
+  restore(snap: RuntimeSnapshot): void {
+    this.state = {
+      messages: snap.agentState.messages.map((m) => ({ ...m })),
+      currentStep: snap.agentState.currentStep,
+      totalTokens: snap.agentState.totalTokens,
+      toolCallHistory: snap.agentState.toolCallHistory.map((h) => ({ ...h })),
+    };
+    this.stateMachine.loadSnapshot(snap.stateMachine);
+    this.workingMemory.loadSnapshot(snap.workingMemory);
+    this.reflectionEngine.loadJSON(snap.reflection);
+    this.logger.info("Agent", `Restored snapshot from ${new Date(snap.timestamp).toISOString()}, step=${snap.agentState.currentStep}`);
+  }
+
+  /** 导出运行报告 JSON（方便后续做评估体系） */
+  exportRunReport(): RunReport {
+    const metrics = this.lastRunMetrics?.currentSnapshot();
+    const now = Date.now();
+    return {
+      goal: metrics?.goal ?? this.stateMachine.currentGoal,
+      finalStatus: metrics?.finalStatus ?? this.stateMachine.status,
+      startedAt: metrics?.startedAt ?? now,
+      finishedAt: metrics?.finishedAt ?? now,
+      durationMs: metrics?.durationMs ?? 0,
+      steps: this.stateMachine.snapshot().totalSteps,
+      tokens: this.state.totalTokens,
+      toolCalls: metrics?.toolCalls ?? 0,
+      retries: metrics?.retries ?? 0,
+      reflections: metrics?.reflections ?? 0,
+      toolUsage: metrics?.toolUsage ?? {},
+      failureCategories: metrics?.failureCategories ?? {},
+      warnings: metrics?.warnings ?? [],
+    };
   }
 }
+

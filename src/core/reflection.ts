@@ -71,6 +71,13 @@ const DEFAULT_CONFIG: ReflectionConfig = {
   recoveryFailureThreshold: 3,
 };
 
+/** Reflection Engine 序列化格式 */
+export interface ReflectionJSON {
+  consecutiveFailures: number;
+  lastToolName: string;
+  recoveryFailureCount: number;
+}
+
 /**
  * Reflection Engine
  *
@@ -88,6 +95,22 @@ export class ReflectionEngine {
 
   constructor(config?: Partial<ReflectionConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  /** 序列化为 JSON（用于 Runtime Snapshot） */
+  toJSON(): ReflectionJSON {
+    return {
+      consecutiveFailures: this.consecutiveFailures,
+      lastToolName: this.lastToolName,
+      recoveryFailureCount: this.recoveryFailureCount,
+    };
+  }
+
+  /** 从 JSON 恢复状态（用于 Runtime Snapshot restore） */
+  loadJSON(data: ReflectionJSON): void {
+    this.consecutiveFailures = data.consecutiveFailures;
+    this.lastToolName = data.lastToolName;
+    this.recoveryFailureCount = data.recoveryFailureCount;
   }
 
   /**
@@ -144,13 +167,13 @@ export class ReflectionEngine {
   ): string {
     const failureSummary = recentFailures
       .slice(-5)
-      .map((f) => `  - Step ${f.id}: ${f.toolName} → ${f.errorType ?? "unknown error"}`)
+      .map((f) => `  - Step ${f.id}: ${f.toolName} -> ${f.errorType ?? "unknown error"}`)
       .join("\n");
 
     const strategy = this.inferNewStrategy(snapshot, recentFailures);
 
     return [
-      "## ⚠️ REFLECTION REQUIRED",
+      "## REFLECTION REQUIRED",
       "",
       "You have been failing repeatedly. Stop and think before continuing.",
       "",

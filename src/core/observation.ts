@@ -1,20 +1,37 @@
 ﻿/**
  * Observation Layer — 观察层
- * 
+ *
  * ============================================================
- * Phase 2 核心：工具原始输出 → 结构化观察
- * 
- * 【设计原则（修正版）】
- * 1. 不是所有工具都需要精简 — read_file 的内容就是要给 LLM 看的
- * 2. 区分两类工具：
- *    - 内容工具（read_file, grep）：返回实际内容 + 摘要
- *    - 动作工具（shell, git）：只返回结构化摘要
- * 3. Observation 的 rawContent 字段携带 LLM 需要的实际数据
+ * Phase 2: 工具原始输出 → 结构化观察
+ * Phase 4.5 升级: Observation 输出结构化 payload + severity/confidence/suggestion
+ *
+ * 【升级目标】
+ * 以前：Observation 偏文本摘要，LLM 只能“读句子猜意思”
+ * 现在：Observation 同时提供：
+ * - summary（给人/LLM 快速理解）
+ * - structuredPayload（机器可读、可复用）
+ * - severity / confidence / status / suggestedNextActions
  * ============================================================
  */
 
 import type { ToolCall, ToolResult } from "../tools/types.js";
 import { getLogger } from "../utils/logger.js";
+
+export type ObservationStatus = "success" | "partial" | "blocked" | "error";
+export type ObservationSeverity = "low" | "medium" | "high" | "critical";
+
+export interface ObservationSuggestion {
+  action: string;
+  reason?: string;
+  priority?: "low" | "medium" | "high";
+}
+
+export interface ObservationSource {
+  toolName: string;
+  toolCallId?: string;
+  arguments?: Record<string, unknown>;
+  filePath?: string;
+}
 
 export interface Observation {
   /** 一句话总结 */
@@ -25,12 +42,26 @@ export interface Observation {
   success: boolean;
   /** 错误类型 */
   errorType?: string;
-  /** 建议下一步 */
+  /** 建议下一步（旧字段，保留兼容） */
   suggestedAction?: string;
   /** 实际内容（read_file/grep 等工具的核心数据） */
   rawContent?: string;
   /** token 估算 */
   tokenEstimate: number;
+
+  // ===== Phase 4.5 新增结构化字段 =====
+  /** 观察状态 */
+  status: ObservationSeverity extends never ? never : ObservationStatus;
+  /** 严重程度（用于 Working Memory / Reflection 权重） */
+  severity: ObservationSeverity;
+  /** 置信度（0-1） */
+  confidence: number;
+  /** 结构化 payload（机器可读） */
+  structuredPayload?: Record<string, unknown>;
+  /** 结构化建议列表 */
+  suggestedNextActions?: ObservationSuggestion[];
+  /** 来源溯源 */
+  source?: ObservationSource;
 }
 
 export interface ObservationExtractor {
@@ -49,30 +80,46 @@ class GenericExtractor implements ObservationExtractor {
     if (result.success) {
       const dataStr = JSON.stringify(result.data ?? {});
       const truncated = dataStr.length > 500 ? dataStr.slice(0, 500) + "..." : dataStr;
-      
+
       return {
         summary: `${toolCall.name} completed successfully`,
         keyFindings: [truncated],
         success: true,
         rawContent: truncated,
         tokenEstimate: Math.ceil(truncated.length / 4),
-      };
-    } else {
-      return {
-        summary: `${toolCall.name} failed: ${result.error ?? "unknown error"}`,
-        keyFindings: [result.error ?? "unknown error"],
-        success: false,
-        errorType: classifyError(result.error ?? ""),
-        suggestedAction: suggestRecovery(toolCall.name, result.error ?? ""),
-        tokenEstimate: 50,
+        status: "success",
+        severity: "low",
+        confidence: 0.8,
+        structuredPayload: { kind: "generic_success", tool: toolCall.name },
+        suggestedNextActions: [{ action: "continue", priority: "low" }],
+        source: buildSource(toolCall),
       };
     }
+
+    const errorText = result.error ?? "unknown error";
+    return {
+      summary: `${toolCall.name} failed: ${errorText}`,
+      keyFindings: [errorText],
+      success: false,
+      errorType: classifyError(errorText),
+      suggestedAction: suggestRecovery(toolCall.name, errorText),
+      tokenEstimate: 50,
+      status: "error",
+      severity: "medium",
+      confidence: 0.7,
+      structuredPayload: {
+        kind: "generic_failure",
+        tool: toolCall.name,
+        errorType: classifyError(errorText),
+      },
+      suggestedNextActions: [{ action: "analyze_failure", reason: "tool failed", priority: "medium" }],
+      source: buildSource(toolCall),
+    };
   }
 }
 
 // ============================================================
 // 文件读取提取器
-// 【修正】read_file 必须返回 content，LLM 就是为了看内容才调的
 // ============================================================
 
 class FileReadExtractor implements ObservationExtractor {
@@ -80,12 +127,26 @@ class FileReadExtractor implements ObservationExtractor {
 
   extract(toolCall: ToolCall, result: ToolResult): Observation {
     if (!result.success) {
+      const errorText = result.error ?? "unknown error";
       return {
-        summary: `Failed to read file: ${result.error}`,
-        keyFindings: [result.error ?? "unknown error"],
+        summary: `Failed to read file: ${errorText}`,
+        keyFindings: [errorText],
         success: false,
-        errorType: classifyError(result.error ?? ""),
+        errorType: classifyError(errorText),
         tokenEstimate: 50,
+        status: "error",
+        severity: "medium",
+        confidence: 0.82,
+        structuredPayload: {
+          kind: "file_read_failure",
+          path: toolCall.arguments?.path,
+          errorType: classifyError(errorText),
+        },
+        suggestedNextActions: [
+          { action: "verify_path", reason: "file read failed", priority: "medium" },
+          { action: "list_nearby_files", priority: "low" },
+        ],
+        source: buildSource(toolCall),
       };
     }
 
@@ -94,8 +155,8 @@ class FileReadExtractor implements ObservationExtractor {
     if (toolCall.name === "file_summary") {
       const funcs = (data["functions"] as string[]) ?? [];
       const classes = (data["classes"] as string[]) ?? [];
-      const lines = data["lines"] as number ?? 0;
-      
+      const lines = (data["lines"] as number) ?? 0;
+
       return {
         summary: `${data["path"]}: ${lines} lines, ${funcs.length} functions, ${classes.length} classes`,
         keyFindings: [
@@ -106,13 +167,25 @@ class FileReadExtractor implements ObservationExtractor {
         ].filter(Boolean),
         success: true,
         tokenEstimate: 60,
+        status: "success",
+        severity: "low",
+        confidence: 0.88,
+        structuredPayload: {
+          kind: "file_summary",
+          path: data["path"],
+          language: data["language"],
+          lines,
+          functionCount: funcs.length,
+          classCount: classes.length,
+        },
+        suggestedNextActions: [{ action: "inspect_suspicious_functions", priority: "low" }],
+        source: buildSource(toolCall, toolCall.arguments?.path as string),
       };
     }
 
-    // read_file — 返回实际文件内容
     const metadata = data["metadata"] as Record<string, unknown> | undefined;
-    const content = data["content"] as string ?? "";
-    
+    const content = (data["content"] as string) ?? "";
+
     return {
       summary: `Read ${metadata?.["showing"] ?? "file"} (${content.length} chars)`,
       keyFindings: [
@@ -121,15 +194,29 @@ class FileReadExtractor implements ObservationExtractor {
         metadata?.["truncated"] ? "⚠️ File truncated — may need to read more sections" : "Complete file shown",
       ],
       success: true,
-      rawContent: content, // 【关键】实际文件内容
+      rawContent: content,
       tokenEstimate: Math.ceil(content.length / 4),
+      status: metadata?.["truncated"] ? "partial" : "success",
+      severity: metadata?.["truncated"] ? "medium" : "low",
+      confidence: 0.86,
+      structuredPayload: {
+        kind: "file_read",
+        path: toolCall.arguments?.path,
+        totalLines: metadata?.["totalLines"],
+        showing: metadata?.["showing"],
+        truncated: !!metadata?.["truncated"],
+        contentLength: content.length,
+      },
+      suggestedNextActions: metadata?.["truncated"]
+        ? [{ action: "read_missing_sections", reason: "file truncated", priority: "high" }]
+        : [{ action: "continue", priority: "low" }],
+      source: buildSource(toolCall, toolCall.arguments?.path as string),
     };
   }
 }
 
 // ============================================================
 // 搜索提取器
-// 【修正】grep 返回的匹配内容也要带在 rawContent 里
 // ============================================================
 
 class SearchExtractor implements ObservationExtractor {
@@ -137,101 +224,158 @@ class SearchExtractor implements ObservationExtractor {
 
   extract(toolCall: ToolCall, result: ToolResult): Observation {
     if (!result.success) {
+      const errorText = result.error ?? "unknown error";
       return {
-        summary: `Search failed: ${result.error}`,
-        keyFindings: [result.error ?? "unknown error"],
+        summary: `Search failed: ${errorText}`,
+        keyFindings: [errorText],
         success: false,
-        errorType: "search_error",
+        errorType: classifyError(errorText),
         tokenEstimate: 50,
+        status: "error",
+        severity: "medium",
+        confidence: 0.75,
+        structuredPayload: {
+          kind: "search_failure",
+          tool: toolCall.name,
+          query: toolCall.arguments?.query ?? toolCall.arguments?.pattern,
+          errorType: classifyError(errorText),
+        },
+        suggestedNextActions: [{ action: "adjust_query", priority: "medium" }],
+        source: buildSource(toolCall),
       };
     }
 
     const data = result.data as Record<string, unknown>;
 
     if (toolCall.name === "grep") {
-      const matches = data["matches"] as Array<{ file: string; line: number; content: string }> ?? [];
-      const total = data["matchesFound"] as number ?? 0;
-      
-      // 把匹配结果格式化为可读文本
-      const matchLines = matches.map(m => `${m.file}:${m.line}: ${m.content}`);
-      
+      const matches = (data["matches"] as Array<{ file: string; line: number; content: string }>) ?? [];
+      const total = (data["totalMatches"] as number) ?? matches.length;
+
       return {
-        summary: `Found ${total} matches for "${data["pattern"]}"`,
-        keyFindings: matches.slice(0, 5).map(m => `${m.file}:${m.line} → ${m.content.slice(0, 80)}`),
+        summary: `Found ${total} matches for "${toolCall.arguments?.pattern ?? toolCall.arguments?.query}"`,
+        keyFindings: matches.slice(0, 5).map(m => `${m.file}:${m.line} → ${m.content.trim().slice(0, 80)}`),
         success: true,
-        rawContent: matchLines.join("\n"),
-        suggestedAction: total > 5 ? `${total - 5} more matches exist. Use read_file to see specific ones.` : undefined,
-        tokenEstimate: 30 + matchLines.length * 20,
+        tokenEstimate: 80,
+        status: "success",
+        severity: total > 0 ? "medium" : "low",
+        confidence: 0.88,
+        structuredPayload: {
+          kind: "grep_result",
+          pattern: toolCall.arguments?.pattern ?? toolCall.arguments?.query,
+          totalMatches: total,
+          topMatches: matches.slice(0, 5).map(m => ({
+            file: m.file,
+            line: m.line,
+            preview: m.content.trim().slice(0, 120),
+          })),
+        },
+        suggestedNextActions: total > 5
+          ? [{ action: "inspect_top_matches", reason: "many matches", priority: "high" }]
+          : [{ action: "continue", priority: "low" }],
+        source: buildSource(toolCall),
       };
     }
 
     // find_files
-    const files = data["files"] as string[] ?? [];
+    const files = (data["files"] as string[]) ?? [];
     return {
-      summary: `Found ${files.length} files matching "${data["pattern"]}"`,
-      keyFindings: files.slice(0, 10),
+      summary: `Found ${files.length} files`,
+      keyFindings: files.slice(0, 5),
       success: true,
-      rawContent: files.join("\n"),
-      tokenEstimate: 20 + files.slice(0, 10).length * 10,
+      tokenEstimate: 60,
+      status: "success",
+      severity: files.length === 0 ? "medium" : "low",
+      confidence: 0.84,
+      structuredPayload: {
+        kind: "find_files_result",
+        totalFiles: files.length,
+        topFiles: files.slice(0, 10),
+      },
+      suggestedNextActions: files.length === 0
+        ? [{ action: "broaden_search", reason: "no files found", priority: "high" }]
+        : [{ action: "inspect_candidate_files", priority: "medium" }],
+      source: buildSource(toolCall),
     };
   }
 }
 
 // ============================================================
-// Shell 提取器 — 这个做精简是对的
-// shell 输出通常很长，LLM 只需要关键信息
+// Shell 提取器
 // ============================================================
 
 class ShellExtractor implements ObservationExtractor {
   toolNames = ["run_shell"];
 
   extract(toolCall: ToolCall, result: ToolResult): Observation {
-    const data = result.data as Record<string, unknown> | undefined;
-    const command = (data?.["command"] as string) ?? "";
-    const stdout = (data?.["stdout"] as string) ?? "";
-    const stderr = (data?.["stderr"] as string) ?? "";
-    const exitCode = data?.["exitCode"] as number | undefined;
-    const duration = data?.["duration"] as number | undefined;
+    const data = (result.data ?? {}) as Record<string, unknown>;
+    const stdout = ((data["stdout"] as string) ?? "").trim();
+    const stderr = ((data["stderr"] as string) ?? "").trim();
+    const exitCode = data["exitCode"] as number | undefined;
+    const durationMs = data["durationMs"] as number | undefined;
+    const command = toolCall.arguments?.command as string ?? "";
 
     if (!result.success) {
-      const errorLines = stderr.split("\n").filter(Boolean).slice(-3);
-      
+      const errorType = classifyShellError(exitCode, stderr);
       return {
-        summary: `Command failed (exit ${exitCode}): ${command}`,
+        summary: `Command failed (exit ${exitCode ?? "?"}): ${command.slice(0, 80)}`,
         keyFindings: [
-          `Exit code: ${exitCode}`,
-          ...errorLines.map(l => `Error: ${l.trim()}`),
-        ],
+          `Exit code: ${exitCode ?? "?"}`,
+          stderr ? `Error: ${stderr.split("\n").slice(-2).join(" | ").slice(0, 120)}` : "",
+          `Duration: ${durationMs ?? "?"}ms`,
+        ].filter(Boolean),
         success: false,
-        errorType: classifyShellError(exitCode, stderr),
+        errorType,
         suggestedAction: suggestShellRecovery(command, exitCode, stderr),
-        rawContent: stderr || stdout, // 失败时带 stderr
-        tokenEstimate: 80,
+        tokenEstimate: 70,
+        status: "error",
+        severity: inferShellSeverity(exitCode, stderr),
+        confidence: 0.82,
+        structuredPayload: {
+          kind: "shell_failure",
+          command,
+          exitCode,
+          durationMs,
+          isTimeout: exitCode === 124,
+          isPermissionDenied: stderr.toLowerCase().includes("permission denied"),
+          isCommandNotFound: exitCode === 127,
+          lastStderrLines: stderr.split("\n").filter(Boolean).slice(-3),
+        },
+        suggestedNextActions: [
+          { action: "reduce_scope", reason: "shell failure", priority: "high" },
+          { action: "retry_with_different_command", priority: "medium" },
+        ],
+        source: buildSource(toolCall),
       };
     }
 
-    const findings: string[] = [];
-    
-    if (command.startsWith("npm test") || command.includes("jest") || command.includes("vitest")) {
-      findings.push(...extractTestResults(stdout));
-    } else if (command.startsWith("git")) {
-      findings.push(...extractGitOutput(command, stdout));
-    } else {
-      const lines = stdout.split("\n").filter(Boolean).slice(0, 5);
-      findings.push(...lines.map(l => l.trim()));
-    }
+    const testResults = extractTestResults(stdout);
+    const isTestCommand = /npm\s+run\s+test|vitest|jest|tsx\s+src\/test/i.test(command);
 
     return {
-      summary: `Command succeeded (${duration}ms): ${command}`,
-      keyFindings: findings.length > 0 ? findings : [stdout.slice(0, 200)],
+      summary: `Command succeeded (${durationMs ?? "?"}ms): ${command.slice(0, 80)}`,
+      keyFindings: isTestCommand ? testResults : stdout.split("\n").filter(Boolean).slice(-3).map(l => l.trim()),
       success: true,
       tokenEstimate: 60,
+      status: "success",
+      severity: "low",
+      confidence: 0.86,
+      structuredPayload: {
+        kind: isTestCommand ? "test_result" : "shell_success",
+        command,
+        exitCode,
+        durationMs,
+        passed: extractCount(stdout, /(\d+)\s+pass/i),
+        failed: extractCount(stdout, /(\d+)\s+fail/i),
+        skipped: extractCount(stdout, /(\d+)\s+skip/i),
+      },
+      suggestedNextActions: [{ action: "continue", priority: "low" }],
+      source: buildSource(toolCall),
     };
   }
 }
 
 // ============================================================
-// Git 提取器 — 精简
+// Git 提取器
 // ============================================================
 
 class GitExtractor implements ObservationExtractor {
@@ -239,56 +383,97 @@ class GitExtractor implements ObservationExtractor {
 
   extract(toolCall: ToolCall, result: ToolResult): Observation {
     if (!result.success) {
+      const errorText = result.error ?? "unknown error";
       return {
-        summary: `Git operation failed: ${result.error}`,
-        keyFindings: [result.error ?? "unknown error"],
+        summary: `Git command failed: ${errorText}`,
+        keyFindings: [errorText],
         success: false,
-        errorType: "git_error",
+        errorType: classifyError(errorText),
         tokenEstimate: 50,
+        status: "error",
+        severity: "medium",
+        confidence: 0.78,
+        structuredPayload: {
+          kind: "git_failure",
+          command: toolCall.name,
+          errorType: classifyError(errorText),
+        },
+        suggestedNextActions: [{ action: "retry_or_switch_git_command", priority: "medium" }],
+        source: buildSource(toolCall),
       };
     }
 
     const data = result.data as Record<string, unknown>;
 
     if (toolCall.name === "git_status") {
-      const summary = data["summary"] as Record<string, number> | undefined;
+      const branch = data["branch"] ?? "unknown";
+      const staged = (data["staged"] as string[]) ?? [];
+      const modified = (data["modified"] as string[]) ?? [];
+      const untracked = (data["untracked"] as string[]) ?? [];
+
       return {
-        summary: `Branch: ${data["branch"]} | ${summary?.["stagedCount"] ?? 0} staged, ${summary?.["unstagedCount"] ?? 0} unstaged, ${summary?.["untrackedCount"] ?? 0} untracked`,
+        summary: `Branch: ${branch} | ${staged.length} staged, ${modified.length} unstaged, ${untracked.length} untracked`,
         keyFindings: [
-          `Branch: ${data["branch"]}`,
-          `Staged: ${(data["staged"] as string[] ?? []).join(", ") || "none"}`,
-          `Modified: ${(data["unstaged"] as string[] ?? []).join(", ") || "none"}`,
-          `Untracked: ${(data["untracked"] as string[] ?? []).join(", ") || "none"}`,
-        ],
+          `Branch: ${branch}`,
+          staged.length > 0 ? `Staged: ${staged.join(", ")}` : "",
+          modified.length > 0 ? `Modified: ${modified.slice(0, 3).join(", ")}` : "",
+          untracked.length > 0 ? `Untracked: ${untracked.slice(0, 3).join(", ")}` : "",
+        ].filter(Boolean),
         success: true,
-        tokenEstimate: 80,
+        tokenEstimate: 60,
+        status: "success",
+        severity: modified.length + staged.length + untracked.length > 5 ? "medium" : "low",
+        confidence: 0.9,
+        structuredPayload: {
+          kind: "git_status",
+          branch,
+          stagedCount: staged.length,
+          modifiedCount: modified.length,
+          untrackedCount: untracked.length,
+          stagedFiles: staged.slice(0, 10),
+          modifiedFiles: modified.slice(0, 10),
+          untrackedFiles: untracked.slice(0, 10),
+        },
+        suggestedNextActions:
+          modified.length + staged.length > 0
+            ? [{ action: "inspect_key_changed_files", priority: "high" }]
+            : [{ action: "continue", priority: "low" }],
+        source: buildSource(toolCall),
       };
     }
 
-    if (toolCall.name === "git_diff") {
-      const content = (data["content"] as string) ?? "";
-      return {
-        summary: `${data["type"]} diff (${data["statOnly"] ? "stat only" : "full"})`,
-        keyFindings: content.split("\n").slice(0, 5),
-        success: true,
-        rawContent: content,
-        tokenEstimate: Math.min(100, Math.ceil(content.length / 4)),
-      };
-    }
-
-    const commits = data["commits"] as Array<{ hash: string; message: string }> ?? [];
+    const lines = ((data["content"] as string) ?? "").split("\n").filter(Boolean);
     return {
-      summary: `Last ${commits.length} commits`,
-      keyFindings: commits.slice(0, 5).map(c => `${c.hash?.slice(0, 7)} ${c.message}`),
+      summary: `${toolCall.name}: ${lines.length} lines`,
+      keyFindings: lines.slice(0, 5).map(l => l.trim()),
       success: true,
-      tokenEstimate: 40,
+      tokenEstimate: 60,
+      status: "success",
+      severity: "low",
+      confidence: 0.82,
+      structuredPayload: {
+        kind: toolCall.name,
+        lineCount: lines.length,
+        previewLines: lines.slice(0, 8).map(l => l.trim()),
+      },
+      suggestedNextActions: [{ action: "continue", priority: "low" }],
+      source: buildSource(toolCall),
     };
   }
 }
 
 // ============================================================
-// 辅助函数
+// 工具函数
 // ============================================================
+
+function buildSource(toolCall: ToolCall, filePath?: string): ObservationSource {
+  return {
+    toolName: toolCall.name,
+    toolCallId: toolCall.id,
+    arguments: toolCall.arguments,
+    filePath: filePath ?? (toolCall.arguments?.path as string | undefined),
+  };
+}
 
 function classifyError(error: string): string {
   const lower = error.toLowerCase();
@@ -307,6 +492,13 @@ function classifyShellError(exitCode: number | undefined, stderr: string): strin
   if (exitCode === 137) return "killed_oom";
   if (stderr.toLowerCase().includes("permission denied")) return "permission_error";
   return `exit_${exitCode ?? "unknown"}`;
+}
+
+function inferShellSeverity(exitCode: number | undefined, stderr: string): ObservationSeverity {
+  if (exitCode === 124) return "high";
+  if (exitCode === 137) return "high";
+  if (stderr.toLowerCase().includes("permission denied")) return "high";
+  return "medium";
 }
 
 function suggestRecovery(toolName: string, error: string): string {
@@ -329,28 +521,27 @@ function suggestShellRecovery(command: string, exitCode: number | undefined, std
 
 function extractTestResults(stdout: string): string[] {
   const findings: string[] = [];
-  
   const passMatch = stdout.match(/(\d+)\s+pass/i);
   const failMatch = stdout.match(/(\d+)\s+fail/i);
   const skipMatch = stdout.match(/(\d+)\s+skip/i);
-  
+
   if (passMatch) findings.push(`Passed: ${passMatch[1]}`);
   if (failMatch) findings.push(`Failed: ${failMatch[1]}`);
   if (skipMatch) findings.push(`Skipped: ${skipMatch[1]}`);
-  
+
   const failLine = stdout.match(/(FAIL|Error|✗|✕).*$/m);
   if (failLine) findings.push(`First failure: ${failLine[0].slice(0, 100)}`);
-  
+
   if (findings.length === 0) {
     findings.push(...stdout.split("\n").filter(Boolean).slice(-3).map(l => l.trim()));
   }
-  
+
   return findings;
 }
 
-function extractGitOutput(command: string, stdout: string): string[] {
-  const lines = stdout.split("\n").filter(Boolean);
-  return lines.slice(0, 5).map(l => l.trim());
+function extractCount(text: string, pattern: RegExp): number | undefined {
+  const m = text.match(pattern);
+  return m ? Number(m[1]) : undefined;
 }
 
 // ============================================================
@@ -374,13 +565,15 @@ export class ObservationManager {
   }
 
   observe(toolCall: ToolCall, result: ToolResult): Observation {
-    const extractor = this.extractors.find(e => 
-      e.toolNames.includes(toolCall.name)
-    ) ?? this.genericExtractor;
+    const extractor =
+      this.extractors.find(e => e.toolNames.includes(toolCall.name)) ?? this.genericExtractor;
 
     const observation = extractor.extract(toolCall, result);
 
     this.logger.debug("Observation", `${toolCall.name}: ${observation.summary}`, {
+      status: observation.status,
+      severity: observation.severity,
+      confidence: observation.confidence,
       findings: observation.keyFindings.length,
       hasRawContent: !!observation.rawContent,
       tokens: observation.tokenEstimate,
@@ -391,13 +584,16 @@ export class ObservationManager {
 
   /**
    * 格式化 Observation 为 LLM 可读的字符串
-   * 【修正】如果有 rawContent，必须包含在输出中
    */
   formatForLLM(observation: Observation): string {
     const parts: string[] = [];
-    
+
     parts.push(`## ${observation.success ? "✅" : "❌"} ${observation.summary}`);
-    
+    parts.push("");
+    parts.push(`Status: ${observation.status}`);
+    parts.push(`Severity: ${observation.severity}`);
+    parts.push(`Confidence: ${observation.confidence}`);
+
     if (observation.keyFindings.length > 0) {
       parts.push("");
       parts.push("Key findings:");
@@ -405,20 +601,25 @@ export class ObservationManager {
         parts.push(`- ${finding}`);
       }
     }
-    
+
     if (observation.errorType) {
       parts.push(`\nError type: ${observation.errorType}`);
     }
-    
-    if (observation.suggestedAction) {
+
+    if (observation.suggestedNextActions && observation.suggestedNextActions.length > 0) {
+      parts.push("");
+      parts.push("Suggested next actions:");
+      for (const suggestion of observation.suggestedNextActions) {
+        parts.push(`- [${suggestion.priority ?? "medium"}] ${suggestion.action}${suggestion.reason ? ` — ${suggestion.reason}` : ""}`);
+      }
+    } else if (observation.suggestedAction) {
       parts.push(`\nSuggested: ${observation.suggestedAction}`);
     }
-    
-    // 【关键修正】如果有实际内容，附加在最后
+
     if (observation.rawContent) {
       parts.push(`\n---\nContent:\n${observation.rawContent}`);
     }
-    
+
     return parts.join("\n");
   }
 }
