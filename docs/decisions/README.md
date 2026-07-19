@@ -1,4 +1,4 @@
-﻿# 决策记录索引
+# 决策记录索引
 
 > 每个 Phase 的关键设计决策、为什么这么做、踩过什么坑。
 > 只记录已实现的内容，不记录规划中的。
@@ -34,3 +34,27 @@
 | [ADR-010](./ADR-010-working-memory.md) | Working Memory：结构化关键信息 + 重要度分级 |
 | [ADR-011](./ADR-011-history-compressor.md) | History Compressor：规则压缩 vs LLM 压缩 |
 | [ADR-012](./ADR-012-context-assembler.md) | Context Assembler：分层组装 + token 上限保护 |
+
+## Phase 4.5: Context Engine Upgrade
+
+| 文件 | 决策 |
+|------|------|
+| [ADR-013](./ADR-013-structured-observation.md) | Observation 结构化载荷设计 |
+| [ADR-014](./ADR-014-working-memory-v2.md) | Working Memory v2（可衰减、可溯源） |
+| [ADR-015](./ADR-015-context-assembler-v2.md) | Context Assembler v2（可解释组装） |
+
+## Phase 4.6: Context Engine Runtime
+
+| 文件 | 决策 |
+|------|------|
+| [ADR-016](./ADR-016-runtime-metrics.md) | Runtime Metrics 设计 |
+| [ADR-017](./ADR-017-history-checkpoints.md) | History Checkpoints 设计 |
+| [ADR-018](./ADR-018-context-changelog.md) | Context Changelog 设计 |
+
+## Phase 4.7: State Runtime Enhancement
+
+| 文件 | 决策 |
+|------|------|
+| [ADR-019](./ADR-019-runtime-snapshot.md) | Runtime Snapshot：checkpoint / resume / replay |
+| [ADR-020](./ADR-020-checkpoint-diff.md) | Summary Checkpoint Diff：比较 checkpoint 之间变化 |
+| [ADR-021](./ADR-021-run-report.md) | Run Report JSON 导出：标准化运行报告 |

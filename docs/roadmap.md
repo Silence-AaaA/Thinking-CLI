@@ -60,7 +60,7 @@
   - 连续失败自动触发反思（注入 prompt 引导 LLM 换策略）
 - [x] **CLI exec 命令** — REPL 中查看执行引擎完整状态
 
-### Phase 4: Context Engineering — 信息管理 ✅
+### Phase 4: Context Engineering — 信息管理 ✅ (Phase 4.6 升级完成)
 - [x] **Working Memory（工作记忆）** — 当前任务关键信息（不进对话历史）
   - 5 类信息：currentGoal / findings / activeFiles / recentErrors / decisions
   - 重要度分级（low / medium / high），超限自动淘汰低重要度
@@ -143,6 +143,9 @@ src/
 │   ├── types.ts              ← LLM 接口
 │   └── openai-adapter.ts     ← OpenAI 兼容实现
 ├── utils/logger.ts           ← 结构化日志
-└── cli/index.ts              ← CLI 入口（REPL + 审批 + exec/wm/ctx 命令）
+└── cli/index.ts              ← CLI 入口（REPL + 审批 + exec/wm/ctx/metrics/ctxdiff）
 ```
+
+
+
 
