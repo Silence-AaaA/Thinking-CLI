@@ -1,4 +1,4 @@
-﻿# ADR-020: Summary Checkpoint Diff
+# ADR-020: Summary Checkpoint Diff
 
 > Phase 4.7 | 状态：已实现
 

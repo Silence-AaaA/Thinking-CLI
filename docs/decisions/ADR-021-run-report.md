@@ -1,4 +1,4 @@
-﻿# ADR-021: Run Report JSON 导出
+# ADR-021: Run Report JSON 导出
 
 > Phase 4.7 | 状态：已实现
 

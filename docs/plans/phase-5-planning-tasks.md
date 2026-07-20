@@ -66,7 +66,118 @@ WorkingMemory（现有，Phase 4）跨步骤保持上下文
 
 ---
 
-## 三、任务清单
+## 三、Working Memory 注入方案
+
+### 设计原则
+
+**WorkingMemory 提供两种格式化方法，面向不同场景：**
+
+| 方法 | 场景 | 内容 |
+|------|------|------|
+| `formatForLLM()` | ReAct 执行时 | 全量输出（所有 findings、strength/confidence 数值） |
+| `formatForPlanning()` | Task 规划时 | 精简输出（只取 high/medium findings，过滤 strength < 5 的噪声） |
+
+两个方法由 WorkingMemory 自己维护，不存在"两处提取同一数据"的问题。
+
+### Task Planner 的注入方式
+
+```typescript
+class TaskPlanner {
+  async plan(goal: string, memory: WorkingMemory): Promise<TaskPlan> {
+    const messages: Message[] = [
+      // 1. 规划专用 system prompt（告诉 LLM 你是在分解任务，不是在执行）
+      { role: "system", content: PLANNING_SYSTEM_PROMPT },
+
+      // 2. Working Memory 的规划版本（已过滤噪声）
+      { role: "user", content: memory.formatForPlanning() },
+      { role: "assistant", content: "Context noted. I will create a step-by-step plan." },
+
+      // 3. 用户目标 + 规划指令
+      { role: "user", content: `## Task\n${goal}\n\nBreak this into concrete, ordered steps. Each step should be completable by a single agent run.` },
+    ];
+
+    const response = await this.llm.chat(messages, []);
+    return this.parsePlan(response.content, goal);
+  }
+}
+```
+
+### formatForPlanning() vs formatForLLM() 对比
+
+```
+formatForLLM() 输出：                          formatForPlanning() 输出：
+─────────────────────                          ──────────────────────────
+## Working Memory                              ## Working Memory (Planning Context)
+Version: 3                                     **Current Goal**: 添加单元测试
+**Goal**: 添加单元测试                         **Key Findings**:
+**Active Files**: src/core/wm.ts                 - [high|src=grep] 12 public methods
+**Key Findings**:                                - [medium|src=read] snapshot() returns ...
+  - [high|str=15|conf=0.90|src=grep|step=2]   **Active Files**: src/core/wm.ts
+  - [medium|str=9|conf=0.78|src=read|step=1]  **Previous Decisions**:
+  - [low|str=3|conf=0.60|src=tool|step=1]       - 使用 vitest
+  - [low|str=2|conf=0.55|src=tool|step=1]     **Known Issues**:
+**Recent Errors**:                               - grep: file_not_found (test/)
+  - grep: file_not_found
+**Decisions**:
+  - 使用 vitest
+
+区别：
+- formatForPlanning 过滤了 strength < 5 和 importance=low 的 findings
+- formatForPlanning 去掉了 strength/confidence 数值（规划不需要）
+- formatForPlanning 去掉了 Version（规划不需要）
+```
+
+### Step Executor 的注入方式
+
+Step Executor 不需要自己注入 Working Memory。
+它调用 `agent.run(stepGoal)`，Agent.run() 内部的 ContextAssembler 会自动注入 `formatForLLM()`（完整版本）。
+
+```typescript
+class StepExecutor {
+  async executeStep(step: TaskStep, plan: TaskPlan, agent: Agent): Promise<string> {
+    // 构造步骤级别 goal
+    const stepGoal = this.buildStepGoal(step, plan);
+
+    // Agent.run() 内部自动通过 ContextAssembler 注入完整 WM
+    const result = await agent.run(stepGoal);
+
+    return result;
+  }
+
+  private buildStepGoal(step: TaskStep, plan: TaskPlan): string {
+    // 只包含：Overall Goal + 前序结果 + 当前步骤
+    // 不注入 WM（Agent.run 内部会做）
+    ...
+  }
+}
+```
+
+### 两层注入总结
+
+```
+┌─────────────────────────────────────────────────┐
+│ 规划阶段（TaskPlanner.plan）                      │
+│                                                  │
+│ memory.formatForPlanning()  → 精简 WM            │
+│ + PLANNING_SYSTEM_PROMPT    → 规划行为指令         │
+│ + goal + 规划指令                                 │
+│                                                  │
+│ 目的：让 LLM 知道上下文，分解任务为步骤            │
+└─────────────────────────────────────────────────┘
+          ↓ 生成 TaskPlan
+┌─────────────────────────────────────────────────┐
+│ 执行阶段（Agent.run 每个 step）                   │
+│                                                  │
+│ ContextAssembler 自动注入:                        │
+│   memory.formatForLLM()    → 完整 WM             │
+│   + state snapshot          → 执行状态             │
+│   + recent history          → 对话历史             │
+│                                                  │
+│ 目的：让 Agent 有完整信息来执行每步               │
+└─────────────────────────────────────────────────┘
+```
+
+## 四、任务清单
 
 ### 5.1 Task Planner（任务分解器）
 
@@ -93,15 +204,20 @@ interface TaskPlan {
 ```
 
 **核心方法**:
-- `plan(goal: string, context: WorkingMemorySnapshot): TaskPlan`
-  - 调用 LLM 把目标分解为步骤
-  - 注入 Working Memory 作为规划上下文
-  - 输出结构化的 TaskPlan
+- `plan(goal: string, memory: WorkingMemory): TaskPlan`
+  - 构建规划专用上下文（system prompt + formatForLLM + buildPlanningPrompt）
+  - 调用 LLM 分解任务
+  - 解析返回的结构化步骤列表
+  - 输出 TaskPlan
 
-- `replan(plan: TaskPlan, failure: string, context: WorkingMemorySnapshot): TaskPlan`
-  - 根据失败信息调整计划
-  - 保留已完成的步骤
-  - 重新规划未完成的部分
+- `replan(plan: TaskPlan, failure: string, memory: WorkingMemory): TaskPlan`
+  - 注入失败信息 + 当前 WM 状态
+  - 保留已完成步骤，重新规划后续步骤
+
+- `buildPlanningPrompt(goal: string, memory: WorkingMemory): string`
+  - 从 WM snapshot 提取：activeFiles、high-strength findings、decisions、errors
+  - 过滤噪声（只取 importance != low 且 strength >= 5）
+  - 组装成规划提示
 
 **ADR**: ADR-022（待创建）
 
@@ -113,21 +229,20 @@ interface TaskPlan {
 
 **职责**:
 - 拿到 TaskPlan，按顺序（或依赖关系）执行每个 Step
-- 每个 Step 调用 Agent.run()，但注入 Step 级别的上下文
+- 每个 Step 调用 Agent.run()，注入步骤级别的上下文
 - 管理 Step 之间的状态传递
 
 **核心方法**:
 - `execute(plan: TaskPlan, agent: Agent): TaskPlan`
   - 遍历 pending 步骤
-  - 每步构造 Agent.run() 的 goal（包含步骤描述 + 前序步骤结果）
+  - 每步构造 Agent.run() 的 goal（包含 Overall Goal + 前序结果 + 当前步骤）
+  - Agent.run() 内部自动通过 ContextAssembler 注入 Working Memory
   - 更新步骤状态
 
 - `buildStepContext(step: TaskStep, plan: TaskPlan, memory: WorkingMemory): string`
-  - 为当前步骤构造上下文：
-    - 原始目标
-    - 前序步骤的结果
-    - 当前步骤的具体要求
-    - Working Memory 中的相关 findings
+  - Overall Goal
+  - 已完成步骤及结果
+  - 当前步骤描述
 
 **ADR**: ADR-023（待创建）
 
@@ -184,7 +299,7 @@ interface TaskPlan {
 
 ---
 
-## 四、实施顺序
+## 五、实施顺序
 
 ```
 5.1 Task Planner         ← 先做（核心能力）
@@ -198,10 +313,11 @@ interface TaskPlan {
 
 ---
 
-## 五、与后续 Phase 的关系
+## 六、与后续 Phase 的关系
 
 | Phase 5 产出 | Phase 6 (Memory) | Phase 7 (Reliability) | Phase 8 (Production) |
 |-------------|------------------|----------------------|---------------------|
 | TaskPlan | 跨会话保存计划 | 评估计划质量 | 多 Agent 分工 |
 | Step 结果 | 长期记忆步骤经验 | 评估步骤成功率 | 步骤级权限控制 |
 | Replan 记录 | 记忆"什么情况下需要 replan" | 评估 replan 频率 | 分布式步骤执行 |
+

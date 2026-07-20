@@ -75,10 +75,12 @@
   - 空 Working Memory 不注入（避免浪费空间）
 - [ ] **Retrieval（按需检索）** — 按需获取文件/知识，不预载（Phase 5 配合）
 
-### Phase 5: Planning — 任务规划 ⬜
-- [ ] **Task Planner（任务分解）** — 用户任务 → 步骤列表
-- [ ] **Step Executor（步骤执行）** — 每步 → 工具调用序列
-- [ ] **Dynamic Replanner（动态重规划）** — 执行中发现问题 → 调整计划
+### Phase 5: Planning — 任务规划 ✅
+- [x] **Task Router（任务路由）** — 判断任务应该走 DIRECT 还是 PLAN 路径
+- [x] **Task Planner（任务分解）** — 四阶段规划：Goal Analysis → Dependency Discovery → Task Decomposition → Execution Plan
+- [x] **Step Executor（步骤执行）** — 每步 → 工具调用序列
+- [x] **Dynamic Replanner（动态重规划）** — 执行中发现问题 → 调整计划
+- [x] **Recursive Decomposition（递归拆解）** — 大任务 → 子任务 → ... → 原子任务
 
 ### Phase 6: Memory — 记忆系统 ⬜
 - [ ] **Session Memory** — 当前对话，自动管理
@@ -145,6 +147,9 @@ src/
 ├── utils/logger.ts           ← 结构化日志
 └── cli/index.ts              ← CLI 入口（REPL + 审批 + exec/wm/ctx/metrics/ctxdiff）
 ```
+
+
+
 
 
 
