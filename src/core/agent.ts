@@ -20,6 +20,9 @@ import { ReflectionEngine, type ReflectionJSON } from "./reflection.js";
 import { WorkingMemory } from "./working-memory.js";
 import { ContextAssembler } from "./context-assembler.js";
 import { RuntimeMetrics } from "./runtime-metrics.js";
+import { TaskRouter } from "./task-router.js";
+import { TaskPlanner, type TaskPlan } from "./task-planner.js";
+import { StepExecutor, type PlanExecutionResult } from "./step-executor.js";
 import { getLogger } from "../utils/logger.js";
 
 export interface AgentConfig {
@@ -142,6 +145,9 @@ export class Agent {
   private state: AgentState;
   private doomLoopDetector: DoomLoopDetector;
   private lastRunMetrics?: RuntimeMetrics;
+  private taskRouter?: TaskRouter;
+  private taskPlanner?: TaskPlanner;
+  private stepExecutor?: StepExecutor;
   private logger = getLogger();
 
   constructor(llm: LLMAdapter, tools: ToolRegistry, config?: AgentConfig) {
@@ -467,6 +473,31 @@ export class Agent {
     this.lastRunMetrics = undefined;
   }
 
+  /**
+   * 步骤级重置：清除执行状态，保留 Working Memory
+   *
+   * 用于 runPlanned() 中每个步骤之间：
+   * - StateMachine 重置到 planning（避免终态阻塞）
+   * - Agent state 清空（避免 step 计数累加）
+   * - DoomLoop / Reflection 重置
+   * - Working Memory 保留（跨步骤共享上下文）
+   */
+  resetForStep(): void {
+    this.state = {
+      messages: [{ role: "system", content: this.config.systemPrompt }],
+      currentStep: 0,
+      totalTokens: 0,
+      toolCallHistory: [],
+    };
+    this.doomLoopDetector.reset();
+    this.stateMachine.reset();
+    this.reflectionEngine.reset();
+    this.lastRunMetrics = undefined;
+  }
+  /** 动态调整最大迭代数（用于 plan step 限制） */
+  setMaxIterations(n: number): void {
+    this.config.maxIterations = n;
+  }
   /** 创建运行时快照（支持 checkpoint / resume / replay） */
   snapshot(): RuntimeSnapshot {
     return {
@@ -497,6 +528,64 @@ export class Agent {
     this.logger.info("Agent", `Restored snapshot from ${new Date(snap.timestamp).toISOString()}, step=${snap.agentState.currentStep}`);
   }
 
+  /**
+   * 带规划的执行：分解任务 → 逐步执行 → 失败时重规划
+   */
+  async runPlanned(goal: string): Promise<PlanExecutionResult> {
+    this.logger.info("Agent", `Starting planned run: ${goal}`);
+
+    // 初始化 TaskPlanner 和 StepExecutor（懒加载）
+    if (!this.taskPlanner) {
+      this.taskPlanner = new TaskPlanner(this.llm);
+    }
+    if (!this.stepExecutor) {
+      this.stepExecutor = new StepExecutor({
+        maxIterationsPerStep: this.taskPlanner.maxIterationsPerStep,
+      });
+    }
+
+    // Phase 1: 规划
+    const plan = await this.taskPlanner.plan(goal, this.workingMemory);
+
+    // Phase 2: 逐步执行（每步前重置执行状态，保留 Working Memory）
+    let result = await this.stepExecutor.executeWithReset(plan, this, this.workingMemory);
+
+    // Phase 3: 如果有失败步骤，尝试重规划一次
+    if (result.finalStatus !== "completed") {
+      const failedSteps = result.plan.steps.filter((s) => s.status === "failed");
+      if (failedSteps.length > 0) {
+        const lastFailed = failedSteps[failedSteps.length - 1];
+        this.logger.info("Agent", `Replanning after step ${lastFailed.id} failed`);
+
+        try {
+          const newPlan = await this.taskPlanner.replan(
+            result.plan,
+            lastFailed,
+            lastFailed.result ?? "Step failed",
+            this.workingMemory
+          );
+          result = await this.stepExecutor.executeWithReset(newPlan, this, this.workingMemory);
+        } catch (e) {
+          this.logger.warn("Agent", `Replan failed: ${e}`);
+        }
+      }
+    }
+
+    this.logger.info(
+      "Agent",
+      `Planned run finished: ${result.completedSteps}/${result.totalSteps} steps, status=${result.finalStatus}`
+    );
+
+    return result;
+  }
+
+  getTaskPlanner(): TaskPlanner | undefined {
+    return this.taskPlanner;
+  }
+
+  getStepExecutor(): StepExecutor | undefined {
+    return this.stepExecutor;
+  }
   /** 导出运行报告 JSON（方便后续做评估体系） */
   exportRunReport(): RunReport {
     const metrics = this.lastRunMetrics?.currentSnapshot();
@@ -518,4 +607,12 @@ export class Agent {
     };
   }
 }
+
+
+
+
+
+
+
+
 

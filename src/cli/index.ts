@@ -1,7 +1,7 @@
 ﻿#!/usr/bin/env node
 
 /**
- * Thinking Agent - CLI 入口
+ * Thinking-CLI - 入口
  *
  * Phase 3 (审批): --no-approval 模式 / audit / stats
  * Phase 3 (执行): exec 命令查看执行引擎状态
@@ -14,6 +14,7 @@
 import { Command } from "commander";
 import * as readline from "readline";
 import { Agent } from "../core/agent.js";
+import type { PlanExecutionResult } from "../core/step-executor.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { fileTools } from "../tools/file-tools.js";
 import { searchTools } from "../tools/search-tools.js";
@@ -21,6 +22,19 @@ import { shellTools } from "../tools/shell-tool.js";
 import { gitTools } from "../tools/git-tools.js";
 import { OpenAIAdapter } from "../llm/openai-adapter.js";
 import { initLogger, LogLevel } from "../utils/logger.js";
+import {
+  theme,
+  gradients,
+  generateBanner,
+  renderWelcomeInfo,
+  renderPrompt,
+  renderThinking,
+  renderResult,
+  renderConfirmation,
+  renderMetrics,
+  renderError,
+  renderRiskLevel,
+} from "../utils/ui.js";
 import type { ToolCall } from "../tools/types.js";
 import type { RiskLevel } from "../core/risk-assessor.js";
 import * as dotenv from "dotenv";
@@ -46,20 +60,25 @@ program
     const logLevel = options.verbose ? LogLevel.DEBUG : LogLevel.INFO;
     const logger = initLogger(logLevel, options.logDir);
 
-    logger.info("CLI", "Initializing Thinking Agent v0.4.6 (Runtime Metrics + Context Checkpoints)");
-
     const registry = new ToolRegistry();
     [...fileTools, ...searchTools, ...shellTools, ...gitTools].forEach(tool => {
       registry.register(tool);
     });
-    logger.info("CLI", `Registered ${registry.listTools().length} tools`);
 
     const llm = new OpenAIAdapter({ model: options.model });
-    logger.info("CLI", `Model: ${options.model}`);
-
     const enableApproval = options.approval !== false;
+    const isRepl = options.repl || !task;
 
-    if (options.repl || !task) {
+    // ── 显示启动 Banner ──
+    console.log(generateBanner());
+    console.log(renderWelcomeInfo({
+      model: options.model,
+      tools: registry.listTools().length,
+      approval: enableApproval,
+      repl: isRepl,
+    }));
+
+    if (isRepl) {
       await startREPL(llm, registry, { enableApproval, logger, options });
     } else {
       await executeTask(llm, registry, task, { enableApproval, logger, options });
@@ -93,21 +112,6 @@ function askUserVia(rl: readline.Interface, question: string): Promise<string> {
   });
 }
 
-function printConfirmation(toolCall: ToolCall, assessment: { level: RiskLevel; reason: string; risks: string[] }) {
-  console.log("\n" + "=".repeat(60));
-  console.log("⚠️  OPERATION REQUIRES CONFIRMATION");
-  console.log("=".repeat(60));
-  console.log(`Tool:    ${toolCall.name}`);
-  console.log(`Command: ${JSON.stringify(toolCall.arguments)}`);
-  console.log(`Risk:    ${assessment.level}`);
-  console.log(`Reason:  ${assessment.reason}`);
-  if (assessment.risks.length > 0) {
-    console.log(`Risks:`);
-    assessment.risks.forEach(r => console.log(`  - ${r}`));
-  }
-  console.log("=".repeat(60));
-}
-
 async function executeTask(
   llm: OpenAIAdapter,
   registry: ToolRegistry,
@@ -115,16 +119,16 @@ async function executeTask(
   opts: { enableApproval: boolean; logger: ReturnType<typeof initLogger>; options: Record<string, unknown> }
 ): Promise<void> {
   opts.logger.info("CLI", `Task: ${task}`);
-  console.log("\n🤔 Thinking...\n");
+  console.log(renderThinking());
 
   const onConfirm = async (
     toolCall: ToolCall,
     assessment: { level: RiskLevel; reason: string; risks: string[] }
   ): Promise<boolean> => {
-    printConfirmation(toolCall, assessment);
+    console.log(renderConfirmation(toolCall, { level: assessment.level as string, reason: assessment.reason, risks: assessment.risks }));
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await new Promise<string>((resolve) => {
-      rl.question("Allow? (y/n): ", (a) => {
+      rl.question(renderPrompt(), (a) => {
         rl.close();
         resolve(a.trim());
       });
@@ -140,12 +144,15 @@ async function executeTask(
 
   try {
     const result = await agent.run(task);
-    console.log("\n📝 Result:\n");
+    console.log(renderResult());
     console.log(result);
-    printRunMetrics(agent);
+    const m = agent.getLastRunMetrics()?.currentSnapshot();
+    if (m) {
+      console.log(renderMetrics(m));
+    }
+    console.log();
   } catch (error) {
-    console.error("\n❌ Error:", error instanceof Error ? error.message : String(error));
-    process.exit(1);
+    console.log(renderError(error instanceof Error ? error.message : String(error)));
   }
 }
 
@@ -157,202 +164,66 @@ async function startREPL(
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: "You> ",
+    prompt: renderPrompt(),
   });
 
-  let isConfirming = false;
-
-  const onConfirm = async (
-    toolCall: ToolCall,
-    assessment: { level: RiskLevel; reason: string; risks: string[] }
-  ): Promise<boolean> => {
-    isConfirming = true;
-    printConfirmation(toolCall, assessment);
-    const answer = await askUserVia(rl, "Allow? (y/n): ");
-    isConfirming = false;
-    return answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
-  };
-
-  const agent = createAgent(llm, registry, {
+  let agent = createAgent(llm, registry, {
     enableApproval: opts.enableApproval,
     options: opts.options,
-    onConfirm,
+    onConfirm: async (toolCall, assessment) => {
+      console.log(renderConfirmation(toolCall, { level: assessment.level as string, reason: assessment.reason, risks: assessment.risks }));
+      const answer = await askUserVia(rl, renderPrompt());
+      return answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
+    },
   });
 
-  console.log("\n🤖 Thinking Agent REPL v0.4.6");
-  console.log("Commands: 'exit' | 'reset' | 'state' | 'exec' | 'wm' | 'ctx' | 'metrics' | 'ctxdiff' | 'audit' | 'stats'\n");
-
+  console.log(theme.dim("  Type your task, or 'help' for commands.\n"));
   rl.prompt();
 
-  rl.on("line", async (line: string) => {
-    const input = line.trim();
+  rl.on("line", async (input: string) => {
+    input = input.trim();
 
-    if (isConfirming) return;
-    if (!input) {
+    if (input === "" || input === "exit" || input === "quit") {
+      if (input === "exit" || input === "quit") {
+        console.log(`\n  ${theme.success("👋")} ${theme.muted("Goodbye!")}\n`);
+        process.exit(0);
+      }
       rl.prompt();
       return;
     }
 
-    if (input === "exit" || input === "quit") {
-      console.log("Bye! 👋");
-      opts.logger.close();
-      process.exit(0);
-    }
-
-    if (input === "reset") {
-      agent.reset();
-      console.log("🔄 History cleared.\n");
-      rl.prompt();
-      return;
-    }
-
-    if (input === "state") {
-      const state = agent.getState();
-      console.log("\n📊 Agent State:");
-      console.log(`  Steps: ${state.currentStep}`);
-      console.log(`  Total Tokens: ${state.totalTokens}`);
-      console.log(`  Tool Calls: ${state.toolCallHistory.length}`);
-      console.log();
-      rl.prompt();
-      return;
-    }
-
-    if (input === "exec") {
-      const snapshot = agent.getStateMachine().snapshot();
-      console.log("\n⚙️  Execution Engine:");
-      console.log(`  Status: ${snapshot.status}`);
-      console.log(`  Goal: ${snapshot.currentGoal || "(none)"}`);
-      console.log(`  Total Steps: ${snapshot.totalSteps}`);
-      console.log(`  Completed: ${snapshot.completedSteps.length}`);
-      console.log(`  Failed: ${snapshot.failedSteps.length}`);
-      console.log(`  Retry Count: ${snapshot.retryCount}`);
-      console.log(`  Tokens Used: ${snapshot.budgetUsed.tokens}`);
-      if (snapshot.reflections.length > 0) {
-        console.log(`  Reflections: ${snapshot.reflections.length}`);
-        snapshot.reflections.forEach((r, i) => {
-          console.log(`    ${i + 1}. [${r.trigger}] ${r.diagnosis} → ${r.newStrategy}`);
-        });
-      }
-      console.log();
-      rl.prompt();
-      return;
-    }
-
-    if (input === "wm") {
-      const wm = agent.getWorkingMemory().snapshot();
-      console.log("\n🧠 Working Memory:");
-      console.log(`  Version: ${wm.version}`);
-      console.log(`  Goal: ${wm.currentGoal || "(none)"}`);
-      console.log(`  Step: ${wm.currentStep}`);
-      if (wm.activeFiles.length > 0) console.log(`  Active Files: ${wm.activeFiles.join(", ")}`);
-      if (wm.findings.length > 0) {
-        console.log(`  Findings (${wm.findings.length}):`);
-        wm.findings
-          .slice()
-          .sort((a, b) => b.strength - a.strength || b.confidence - a.confidence)
-          .slice(-8)
-          .reverse()
-          .forEach(f => {
-            const src = f.source.toolName ?? f.source.kind;
-            console.log(`    [${f.importance}|str=${f.strength}|conf=${f.confidence.toFixed(2)}|src=${src}|step=${f.lastSeenStep}] ${f.content.slice(0, 90)}`);
-          });
-      }
-      if (wm.recentErrors.length > 0) {
-        console.log(`  Recent Errors:`);
-        wm.recentErrors.forEach(e => console.log(`    - ${e}`));
-      }
-      if (wm.decisions.length > 0) {
-        console.log(`  Decisions:`);
-        wm.decisions.slice(-5).forEach(d => console.log(`    - ${d}`));
-      }
-      console.log();
-      rl.prompt();
-      return;
-    }
-
-    if (input === "ctx") {
-      const assembled = agent.getContextAssembler().assemble(
-        agent.getState().messages,
-        agent.getWorkingMemory(),
-        agent.getStateMachine(),
-        agent.getState().currentStep
-      );
-      const r = assembled.report;
-      console.log("\n📐 Context Assembly Report:");
-      console.log(`  Context Version: ${r.contextVersion}`);
-      console.log(`  Memory Version: ${r.memoryVersion}`);
-      console.log(`  Step: ${r.step}`);
-      console.log(`  Checkpoint Created: ${r.checkpointCreated}`);
-      console.log(`  Total Messages: ${r.totalMessages}`);
-      console.log(`  Estimated Tokens: ${r.estimatedTotalTokens}`);
-      console.log(`  Max Allowed Tokens: ${r.maxAllowedTokens}`);
-      console.log(`  Compressed Messages: ${r.compressedMessages}`);
-      console.log(`  Dropped For Budget: ${r.droppedForBudget}`);
-      console.log(`  Injected Memory: ${r.injectedMemory}`);
-      console.log(`  Injected State: ${r.injectedState}`);
-      if (r.sections.length > 0) {
-        console.log(`  Sections:`);
-        r.sections.forEach(s => {
-          console.log(`    - ${s.name}: msgs=${s.messageCount}, tokens=${s.estimatedTokens}${s.note ? `, ${s.note}` : ""}`);
-        });
-      }
-      if (r.changedBecause.length > 0) {
-        console.log(`  Changed Because:`);
-        r.changedBecause.forEach(w => console.log(`    - ${w}`));
-      }
-      if (r.warnings.length > 0) {
-        console.log(`  Warnings:`);
-        r.warnings.forEach(w => console.log(`    - ${w}`));
-      }
-      console.log();
-      rl.prompt();
-      return;
-    }
-
-    if (input === "metrics") {
-      printRunMetrics(agent);
-      console.log();
-      rl.prompt();
-      return;
-    }
-
-    if (input === "ctxdiff") {
-      const changelog = agent.getContextAssembler().getContextChangelog();
-      const entries = changelog.list();
-      if (entries.length < 2) {
-        console.log("\n📐 Context Diff: not enough versions yet");
-      } else {
-        const from = entries[entries.length - 2];
-        const to = entries[entries.length - 1];
-        const diff = changelog.diffVersions(from.contextVersion, to.contextVersion);
-        console.log("\n📐 Context Diff (last two versions):");
-        console.log(`  From Version: ${from.contextVersion} (step=${from.step})`);
-        console.log(`  To Version:   ${to.contextVersion} (step=${to.step})`);
-        console.log(`  Token Delta: ${diff.tokenDelta ?? 0}`);
-        console.log(`  Compressed Delta: ${diff.compressedDelta ?? 0}`);
-        console.log(`  Dropped Delta: ${diff.droppedDelta ?? 0}`);
-        console.log(`  Memory Delta: ${diff.memoryDelta ?? 0}`);
-        if ((diff.changedBecause ?? []).length > 0) {
-          console.log(`  Changed Because:`);
-          (diff.changedBecause ?? []).forEach(w => console.log(`    - ${w}`));
-        }
-      }
-      console.log();
+    if (input === "help") {
+      console.log(`
+  ${gradients.aurora("◈ Commands")}
+  ${theme.muted("  " + "─".repeat(40))}
+  ${theme.primary("◆")} ${theme.bold("help")}         Show this help
+  ${theme.primary("◆")} ${theme.bold("audit")}        View audit log
+  ${theme.primary("◆")} ${theme.bold("stats")}        Risk statistics
+  ${theme.primary("◆")} ${theme.bold("wm")}           Working memory
+  ${theme.primary("◆")} ${theme.bold("ctx")}           Context state
+  ${theme.primary("◆")} ${theme.bold("metrics")}       Runtime metrics
+  ${theme.primary("◆")} ${theme.bold("ctxdiff")}       Context diff
+  ${theme.primary("◆")} ${theme.bold("clear")}         Clear context
+  ${theme.primary("◆")} ${theme.bold("exit")} / ${theme.bold("quit")}   Exit
+  ${theme.muted("  " + "─".repeat(40))}
+`);
       rl.prompt();
       return;
     }
 
     if (input === "audit") {
-      const log = agent.getGateway().getAuditLog();
-      console.log("\n📋 Audit Log:");
-      if (log.length === 0) {
-        console.log("  (no operations recorded yet)");
+      const audit = agent.getGateway().getAuditLog();
+      if (audit.length === 0) {
+        console.log(`\n  ${theme.muted("No audit entries.")}\n`);
       } else {
-        log.slice(-10).forEach(entry => {
-          const icon = entry.result === "denied" ? "🚫" : entry.result === "executed" ? "✅" : "⏳";
-          console.log(`  ${icon} [${entry.riskLevel}] ${entry.toolCall.name} → ${entry.result || "pending"}`);
+        console.log(`\n  ${gradients.aurora("◈ Audit Log")}`);
+        console.log(theme.muted("  " + "─".repeat(50)));
+        audit.slice(-10).forEach((entry, i) => {
+          const level = entry.riskLevel as string;
+          const riskColor = level === "DESTRUCTIVE" || level === "BLOCKED" ? theme.red : level === "EXECUTE" ? theme.yellow : theme.green;
+          console.log(`  ${theme.dim(`#${i + 1}`)} ${theme.bold(entry.toolCall.name)} → ${renderRiskLevel(level)} ${theme.dim(`[${entry.result || "pending"}]`)}`);
           if (entry.risks.length > 0) {
-            entry.risks.forEach(r => console.log(`     ⚠️  ${r}`));
+            entry.risks.forEach(r => console.log(`     ${theme.warning("⚠")} ${r}`));
           }
         });
       }
@@ -363,35 +234,113 @@ async function startREPL(
 
     if (input === "stats") {
       const stats = agent.getGateway().getStats();
-      console.log("\n📊 Risk Statistics:");
-      console.log(`  Total operations: ${stats.total}`);
-      console.log(`  By risk level:`);
+      console.log(`\n  ${gradients.aurora("◈ Risk Statistics")}`);
+      console.log(theme.muted("  " + "─".repeat(40)));
+      console.log(`  ${theme.primary("◆")} Total: ${theme.bold(stats.total.toString())}`);
+      console.log(`  ${theme.bold("  By Level:")}`);
       Object.entries(stats.byLevel).forEach(([level, count]) => {
-        if (count > 0) console.log(`    ${level}: ${count}`);
+        if (count > 0) console.log(`    ${theme.accent(level)}: ${theme.bold(count.toString())}`);
       });
-      console.log(`  By result:`);
+      console.log(`  ${theme.bold("  By Result:")}`);
       Object.entries(stats.byResult).forEach(([result, count]) => {
-        if (count > 0) console.log(`    ${result}: ${count}`);
+        if (count > 0) console.log(`    ${theme.accent(result)}: ${theme.bold(count.toString())}`);
       });
       console.log();
       rl.prompt();
       return;
     }
 
+
+    // Handle "plan" command
+    if (input.toLowerCase().startsWith("plan ")) {
+      const task = input.slice(5).trim();
+      if (task) {
+        console.log(`\n  ${gradients.primary("◈ Planning task...")}\n`);
+        try {
+          const result = await agent.runPlanned(task);
+          printPlanResult(result);
+        } catch (error) {
+          console.log(renderError(error instanceof Error ? error.message : String(error)));
+        }
+      } else {
+        console.log(`\n  ${theme.warning("⚠")} ${theme.muted("Usage: plan <task description>")}\n`);
+      }
+      rl.prompt();
+      return;
+    }
+
     try {
-      console.log("\n🤔 Thinking...\n");
+      console.log(renderThinking());
       const result = await agent.run(input);
-      console.log("\n📝 Result:\n");
+      console.log(renderResult());
       console.log(result);
       printRunMetrics(agent);
       console.log();
     } catch (error) {
-      console.error("\n❌ Error:", error instanceof Error ? error.message : String(error));
-      console.log();
+      console.log(renderError(error instanceof Error ? error.message : String(error)));
     }
 
     rl.prompt();
   });
+}
+
+
+program
+  .command("plan")
+  .description("Execute a complex task with planning (decompose → execute → replan)")
+  .argument("<task>", "Complex task to plan and execute")
+  .option("--model <model>", "LLM model to use", process.env.OPENAI_MODEL || "gpt-4o")
+  .option("--max-iterations <n>", "Max ReAct iterations per step", "20")
+  .option("--verbose", "Enable verbose logging")
+  .option("--no-approval", "Disable approval system")
+  .action(async (task: string, options) => {
+    const logLevel = options.verbose ? LogLevel.DEBUG : LogLevel.INFO;
+    const logger = initLogger(logLevel);
+
+    logger.info("CLI", `Planned task: ${task}`);
+    console.log(`\n  ${gradients.primary("◈ Planning task...")}\n`);
+
+    const registry = new ToolRegistry();
+    [...fileTools, ...searchTools, ...shellTools, ...gitTools].forEach(tool => {
+      registry.register(tool);
+    });
+
+    const llm = new OpenAIAdapter({ model: options.model });
+    const enableApproval = options.approval !== false;
+
+    const agent = createAgent(llm, registry, {
+      enableApproval,
+      options,
+    });
+
+    try {
+      const result = await agent.runPlanned(task);
+      printPlanResult(result);
+    } catch (error) {
+      console.log(renderError(error instanceof Error ? error.message : String(error)));
+    }
+  });
+
+function printPlanResult(result: PlanExecutionResult) {
+  console.log("");
+  console.log(gradients.aurora("  ◈ Plan Execution Result"));
+  console.log(theme.muted("  " + "─".repeat(50)));
+  console.log(`  ${theme.primary("◆")} Goal    : ${theme.bold(result.plan.goal)}`);
+  console.log(`  ${theme.primary("◆")} Status  : ${result.finalStatus === "completed" ? theme.success(result.finalStatus) : theme.error(result.finalStatus)}`);
+  console.log(`  ${theme.primary("◆")} Steps   : ${theme.bold(`${result.completedSteps}/${result.totalSteps}`)} completed`);
+  console.log(`  ${theme.primary("◆")} Duration: ${theme.bold((result.durationMs / 1000).toFixed(1))}s`);
+  console.log(`  ${theme.primary("◆")} Version : ${theme.dim(`v${result.plan.version}`)}`);
+  console.log("");
+  console.log(`  ${theme.bold("Steps:")}`);
+  for (const step of result.plan.steps) {
+    const icon = step.status === "completed" ? theme.success("✅") : step.status === "failed" ? theme.error("❌") : step.status === "skipped" ? theme.warning("⏭️") : theme.muted("⬜");
+    console.log(`    ${icon} ${theme.bold(`Step ${step.id}`)}: ${step.description}`);
+    if (step.result) {
+      console.log(`       ${theme.dim("→")} ${theme.dim(step.result.slice(0, 100))}${step.result.length > 100 ? theme.dim("...") : ""}`);
+    }
+  }
+  console.log(theme.muted("  " + "─".repeat(50)));
+  console.log("");
 }
 
 program.parse();
@@ -399,29 +348,9 @@ program.parse();
 function printRunMetrics(agent: Agent) {
   const m = agent.getLastRunMetrics()?.currentSnapshot();
   if (!m) return;
-  console.log("\n📊 Run Metrics:");
-  console.log(`  Run ID: ${m.runId}`);
-  console.log(`  Status: ${m.finalStatus}`);
-  console.log(`  Loops: ${m.loops}`);
-  console.log(`  Tool Calls: ${m.toolCalls}`);
-  console.log(`  Retries: ${m.retries}`);
-  console.log(`  Reflections: ${m.reflections}`);
-  console.log(`  Prompt Tokens: ${m.promptTokens}`);
-  console.log(`  Completion Tokens: ${m.completionTokens}`);
-  console.log(`  Total Tokens: ${m.totalTokens}`);
-  console.log(`  Context Compressed Messages: ${m.compressions}`);
-  console.log(`  Context Dropped Messages: ${m.contextDroppedMessages}`);
-  console.log(`  Context Versions: ${m.contextVersions}`);
-  console.log(`  WM Version Start->End: ${m.workingMemoryVersionStart} -> ${m.workingMemoryVersionEnd}`);
-  if (m.durationMs != null) console.log(`  Duration: ${m.durationMs} ms`);
-  const failures = Object.entries(m.failureCategories ?? {}).filter(([,v]) => (v as number) > 0);
-  if (failures.length > 0) {
-    console.log(`  Failure Categories:`);
-    failures.forEach(([k, v]) => console.log(`    - ${k}: ${v}`));
-  }
-  const tools = Object.entries(m.toolUsage ?? {}).sort((a,b) => (b[1] as number) - (a[1] as number)).slice(0,8);
-  if (tools.length > 0) {
-    console.log(`  Top Tools:`);
-    tools.forEach(([k, v]) => console.log(`    - ${k}: ${v}`));
-  }
+  console.log(renderMetrics(m));
 }
+
+
+
+

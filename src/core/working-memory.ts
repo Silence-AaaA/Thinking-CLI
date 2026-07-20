@@ -271,6 +271,44 @@ export class WorkingMemory {
     this._version = snap.version;
     this.logger.info("WorkingMemory", `Loaded snapshot: version=${snap.version}, findings=${snap.findings.length}`);
   }
+  /** 为 Task Planning 格式化（只输出规划相关信息，过滤噪声） */
+  formatForPlanning(): string {
+    const lines: string[] = ["## Working Memory (Planning Context)"];
+
+    if (this._currentGoal) {
+      lines.push(`**Current Goal**: ${this._currentGoal}`);
+    }
+
+    // 只取高价值 findings
+    const relevant = this._findings
+      .filter((f) => f.importance !== "low" && f.strength >= 5)
+      .sort((a, b) => b.strength - a.strength || b.confidence - a.confidence)
+      .slice(0, 8);
+
+    if (relevant.length > 0) {
+      lines.push("**Key Findings**:");
+      for (const f of relevant) {
+        const sourceTag = f.source.toolName ?? f.source.kind;
+        lines.push(`  - [${f.importance}|src=${sourceTag}] ${f.content}`);
+      }
+    }
+
+    if (this._activeFiles.size > 0) {
+      lines.push(`**Active Files**: ${[...this._activeFiles.keys()].join(", ")}`);
+    }
+
+    if (this._decisions.length > 0) {
+      lines.push("**Previous Decisions**:");
+      this._decisions.forEach((d) => lines.push(`  - ${d}`));
+    }
+
+    if (this._recentErrors.length > 0) {
+      lines.push("**Known Issues**:");
+      this._recentErrors.forEach((e) => lines.push(`  - ${e}`));
+    }
+
+    return lines.join("\n");
+  }
   formatForLLM(): string {
     const lines: string[] = ["## Working Memory"];
     lines.push(`Version: ${this._version}`);
@@ -364,4 +402,5 @@ function clamp(value: number, min: number, max: number): number {
 function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
+
 

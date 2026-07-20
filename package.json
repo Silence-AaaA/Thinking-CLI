@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "thinking-agent",
   "version": "0.4.6",
   "description": "A CLI coding agent built for learning Agent architecture",
@@ -20,11 +20,28 @@
     "test:phase4": "tsx src/test-phase4.ts",
     "test:all": "tsx src/test.ts && tsx src/test-observation.ts && tsx src/test-phase3.ts && tsx src/test-phase3-exec.ts && tsx src/test-phase4.ts"
   },
-  "keywords": ["agent", "cli", "llm", "react"],
+  "keywords": [
+    "agent",
+    "cli",
+    "llm",
+    "react"
+  ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@types/figlet": "^1.7.0",
+    "@types/node": "^26.1.1",
+    "boxen": "^8.0.1",
+    "chalk": "^5.6.2",
+    "commander": "^15.0.0",
+    "dotenv": "^17.4.2",
+    "figlet": "^1.11.2",
+    "gradient-string": "^3.0.0",
+    "openai": "^6.48.0",
+    "tsx": "^4.23.1"
+  }
 }
-
-
-
-
