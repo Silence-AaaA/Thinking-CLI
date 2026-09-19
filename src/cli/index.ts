@@ -9,7 +9,7 @@
 import { Command } from "commander";
 import * as dotenv from "dotenv";
 import * as readline from "readline";
-import { getCapabilityProfile } from "../capabilities.js";
+import { type CapabilityLevel, getCapabilityProfile } from "../capabilities.js";
 import { getConfigPaths, loadConfig, saveProjectConfig } from "../config.js";
 import { Agent } from "../core/agent.js";
 import type { RiskLevel } from "../core/risk-assessor.js";
@@ -41,9 +41,23 @@ import {
 
 dotenv.config();
 
+function assertApiKey(): void {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error(
+      renderError(
+        "Missing OPENAI_API_KEY. Copy .env.example to .env and fill in your API key (DeepSeek example included).",
+      ),
+    );
+    process.exit(1);
+  }
+}
+
 const program = new Command();
 
-program.name("thinking-agent").description("A CLI coding agent built for learning Agent architecture").version("0.4.6");
+program
+  .name("thinking-agent")
+  .description("A CLI coding agent with ReAct loop, planning, memory and safety controls")
+  .version("0.4.6");
 
 program
   .argument("[task]", "Task to execute (omit for REPL mode)")
@@ -72,6 +86,7 @@ program
       registry.register(tool);
     });
 
+    assertApiKey();
     const llm = new OpenAIAdapter({
       model,
       temperature: capProfile.temperature,
@@ -189,6 +204,7 @@ async function executeTask(
     console.log();
   } catch (error) {
     console.log(renderError(error instanceof Error ? error.message : String(error)));
+    process.exitCode = 1;
   }
 }
 
@@ -287,7 +303,7 @@ async function startREPL(
     // ── cap save ──
     if (input === "cap save" || input === "capability save") {
       try {
-        saveProjectConfig({ defaultCapability: currentCapLevel as any });
+        saveProjectConfig({ defaultCapability: currentCapLevel as CapabilityLevel });
         console.log(
           `\n  ${theme.success("✅")} Saved ${renderCapabilityBadge(currentCapLevel)} as default to ${theme.dim(".thinking.json")}\n`,
         );
@@ -438,6 +454,7 @@ program
       registry.register(tool);
     });
 
+    assertApiKey();
     const llm = new OpenAIAdapter({
       model,
       temperature: capProfile.temperature,
@@ -455,6 +472,7 @@ program
       printPlanResult(result);
     } catch (error) {
       console.log(renderError(error instanceof Error ? error.message : String(error)));
+      process.exitCode = 1;
     }
   });
 
