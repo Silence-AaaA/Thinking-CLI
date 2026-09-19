@@ -8,8 +8,8 @@
  * 4. Execution Plan (展平)
  */
 
-import { TaskPlanner, type TaskPlan, type TaskStep, type GoalAnalysis, type TaskNode } from "./core/task-planner.js";
 import { StepExecutor } from "./core/step-executor.js";
+import { type GoalAnalysis, type TaskNode, type TaskPlan, TaskPlanner, type TaskStep } from "./core/task-planner.js";
 import { WorkingMemory } from "./core/working-memory.js";
 import type { LLMAdapter, LLMResponse, Message } from "./llm/types.js";
 
@@ -54,7 +54,7 @@ function createDefaultTaskTree(goal: string, steps: TaskStep[]): TaskNode {
       children: [],
       isAtomic: true,
       status: "pending" as const,
-      dependencies: s.dependencies.map(d => String(d)),
+      dependencies: s.dependencies.map((d) => String(d)),
       retryCount: 0,
     })),
     isAtomic: false,
@@ -103,7 +103,11 @@ async function testTaskPlanner() {
     subtasks: [
       { title: "Read API", description: "Read the working-memory.ts file to understand the API", dependencies: [] },
       { title: "Create test file", description: "Create test file with vitest", dependencies: ["Read API"] },
-      { title: "Write tests", description: "Write tests for snapshot() and loadSnapshot()", dependencies: ["Create test file"] },
+      {
+        title: "Write tests",
+        description: "Write tests for snapshot() and loadSnapshot()",
+        dependencies: ["Create test file"],
+      },
       { title: "Run tests", description: "Run tests and verify all pass", dependencies: ["Write tests"] },
     ],
   });
@@ -183,7 +187,7 @@ async function testStepExecutor() {
   const result = await executor.executeWithReset(
     plan,
     mockAgent as unknown as Parameters<typeof executor.executeWithReset>[1],
-    memory
+    memory,
   );
 
   console.log(`Status: ${result.finalStatus}`);
@@ -196,7 +200,10 @@ async function testStepExecutor() {
 
   console.assert(result.finalStatus === "completed", "Expected completed status");
   console.assert(result.completedSteps === 3, "Expected 3 completed steps");
-  console.assert(result.plan.steps.every((s) => s.status === "completed"), "All steps should be completed");
+  console.assert(
+    result.plan.steps.every((s) => s.status === "completed"),
+    "All steps should be completed",
+  );
   console.log("✅ StepExecutor.executeWithReset() passed\n");
 }
 
@@ -206,7 +213,13 @@ async function testStepFailure() {
   const plan = createTaskPlan("Test failure handling", [
     { id: 1, description: "Step one (will succeed)", status: "pending", dependencies: [], retryCount: 0 },
     { id: 2, description: "Step two (will fail)", status: "pending", dependencies: [1], retryCount: 0 },
-    { id: 3, description: "Step three (depends on 2, should be skipped)", status: "pending", dependencies: [2], retryCount: 0 },
+    {
+      id: 3,
+      description: "Step three (depends on 2, should be skipped)",
+      status: "pending",
+      dependencies: [2],
+      retryCount: 0,
+    },
   ]);
 
   let callCount = 0;
@@ -224,7 +237,7 @@ async function testStepFailure() {
   const result = await executor.executeWithReset(
     plan,
     mockAgent as unknown as Parameters<typeof executor.executeWithReset>[1],
-    new WorkingMemory()
+    new WorkingMemory(),
   );
 
   console.log(`Status: ${result.finalStatus}`);
@@ -246,8 +259,22 @@ async function testReplan() {
   console.log("=== Test: TaskPlanner.replan() ===\n");
 
   const originalPlan = createTaskPlan("Add tests", [
-    { id: 1, description: "Read API", status: "completed", dependencies: [], result: "Found 12 methods", retryCount: 0 },
-    { id: 2, description: "Write tests", status: "failed", dependencies: [1], result: "vitest not installed", retryCount: 2 },
+    {
+      id: 1,
+      description: "Read API",
+      status: "completed",
+      dependencies: [],
+      result: "Found 12 methods",
+      retryCount: 0,
+    },
+    {
+      id: 2,
+      description: "Write tests",
+      status: "failed",
+      dependencies: [1],
+      result: "vitest not installed",
+      retryCount: 2,
+    },
     { id: 3, description: "Run tests", status: "pending", dependencies: [2], retryCount: 0 },
   ]);
 
@@ -262,12 +289,7 @@ async function testReplan() {
   const planner = new TaskPlanner(llm);
   const failedStep = originalPlan.steps[1];
 
-  const newPlan = await planner.replan(
-    originalPlan,
-    failedStep,
-    "vitest not installed",
-    new WorkingMemory()
-  );
+  const newPlan = await planner.replan(originalPlan, failedStep, "vitest not installed", new WorkingMemory());
 
   console.log(`Original version: ${originalPlan.version}`);
   console.log(`New version: ${newPlan.version}`);
@@ -288,7 +310,14 @@ async function testBuildStepGoal() {
   console.log("=== Test: StepExecutor.buildStepGoal() ===\n");
 
   const plan = createTaskPlan("Add unit tests", [
-    { id: 1, description: "Read the API", status: "completed", dependencies: [], result: "Found 12 public methods", retryCount: 0 },
+    {
+      id: 1,
+      description: "Read the API",
+      status: "completed",
+      dependencies: [],
+      result: "Found 12 public methods",
+      retryCount: 0,
+    },
     { id: 2, description: "Write test file", status: "pending", dependencies: [1], retryCount: 0 },
     { id: 3, description: "Run tests", status: "pending", dependencies: [2], retryCount: 0 },
   ]);

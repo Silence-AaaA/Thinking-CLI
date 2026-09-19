@@ -1,19 +1,19 @@
 ﻿/**
  * Phase 3 测试 - 分级审批系统
- * 
+ *
  * 测试内容：
  * 1. 风险评估器（RiskAssessor）
  * 2. 审批网关（ApprovalGateway）
  * 3. 各类操作的风险分级
  */
 
-import { ToolRegistry } from "./tools/registry.js";
+import { ApprovalGateway } from "./core/approval-gateway.js";
+import { ApprovalDecision, RiskAssessor, RiskLevel } from "./core/risk-assessor.js";
 import { fileTools } from "./tools/file-tools.js";
+import { gitTools } from "./tools/git-tools.js";
+import { ToolRegistry } from "./tools/registry.js";
 import { searchTools } from "./tools/search-tools.js";
 import { shellTools } from "./tools/shell-tool.js";
-import { gitTools } from "./tools/git-tools.js";
-import { RiskAssessor, RiskLevel, ApprovalDecision } from "./core/risk-assessor.js";
-import { ApprovalGateway } from "./core/approval-gateway.js";
 import type { ToolCall } from "./tools/types.js";
 
 function makeToolCall(name: string, args: Record<string, unknown>): ToolCall {
@@ -105,7 +105,7 @@ async function testRiskAssessor() {
     const result = assessor.assess(tc.call);
     const levelOk = result.level === tc.expectedLevel;
     const decisionOk = result.decision === tc.expectedDecision;
-    
+
     if (levelOk && decisionOk) {
       console.log(`  ✅ ${tc.name} → ${result.level}/${result.decision}`);
       passed++;
@@ -117,7 +117,9 @@ async function testRiskAssessor() {
       failed++;
     }
     if (result.risks.length > 0) {
-      result.risks.forEach(r => console.log(`     ⚠️  ${r}`));
+      result.risks.forEach((r) => {
+        console.log(`     ⚠️  ${r}`);
+      });
     }
   }
 
@@ -129,7 +131,9 @@ async function testApprovalGateway() {
   console.log("=== 测试审批网关 ===\n");
 
   const registry = new ToolRegistry();
-  [...fileTools, ...searchTools, ...shellTools, ...gitTools].forEach(t => registry.register(t));
+  [...fileTools, ...searchTools, ...shellTools, ...gitTools].forEach((t) => {
+    registry.register(t);
+  });
 
   let confirmCalled = false;
   const gateway = new ApprovalGateway(registry, {
@@ -164,7 +168,7 @@ async function testApprovalGateway() {
   console.log("  Test 4: 审计日志");
   const auditLog = gateway.getAuditLog();
   console.log(`    Total entries: ${auditLog.length}`);
-  auditLog.forEach(e => {
+  auditLog.forEach((e) => {
     console.log(`    [${e.riskLevel}] ${e.toolCall.name} → ${e.result}`);
   });
   console.log();
@@ -184,7 +188,9 @@ async function testDevMode() {
   console.log("=== 测试开发模式（审批关闭）===\n");
 
   const registry = new ToolRegistry();
-  [...fileTools, ...searchTools, ...shellTools, ...gitTools].forEach(t => registry.register(t));
+  [...fileTools, ...searchTools, ...shellTools, ...gitTools].forEach((t) => {
+    registry.register(t);
+  });
 
   const gateway = new ApprovalGateway(registry, {
     enabled: false, // 开发模式
@@ -201,11 +207,7 @@ async function testDevMode() {
 async function main() {
   console.log("\n🧪 Phase 3: 分级审批系统测试\n");
 
-  const results = [
-    await testRiskAssessor(),
-    await testApprovalGateway(),
-    await testDevMode(),
-  ];
+  const results = [await testRiskAssessor(), await testApprovalGateway(), await testDevMode()];
 
   if (results.every(Boolean)) {
     console.log("✅ 所有 Phase 3 测试通过！");

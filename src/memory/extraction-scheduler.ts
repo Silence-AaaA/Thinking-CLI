@@ -73,7 +73,7 @@ export class ExtractionScheduler {
       this.toolCallsSinceLast = 0;
       this.logger.info(
         "ExtractionScheduler",
-        `Triggered: tokenDelta=${tokenDelta}, toolCalls=${toolCallsBefore}, noToolCalls=${noToolCalls}`
+        `Triggered: tokenDelta=${tokenDelta}, toolCalls=${toolCallsBefore}, noToolCalls=${noToolCalls}`,
       );
     } else {
       // 未触发时，如果 token 条件不满足，重置 toolCallsSinceLast
@@ -144,7 +144,3 @@ export class ExtractionScheduler {
     this.lastTurnHadToolCalls = data.lastTurnHadToolCalls;
   }
 }
-
-
-
-

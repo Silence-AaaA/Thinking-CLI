@@ -19,9 +19,9 @@
  * ============================================================
  */
 
-import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import * as path from "path";
 import { getLogger } from "../utils/logger.js";
 
 // ============================================================
@@ -33,13 +33,13 @@ export type InstructionSourceType = "managed" | "global" | "project" | "local";
 export interface InstructionSource {
   path: string;
   type: InstructionSourceType;
-  priority: number;        // 越高越优先（managed=1, global=2, project=3, local=4）
+  priority: number; // 越高越优先（managed=1, global=2, project=3, local=4）
   content: string;
 }
 
 export interface InstructionContext {
-  merged: string;          // 合并后的最终文本
-  sources: InstructionSource[];  // 按优先级升序排列
+  merged: string; // 合并后的最终文本
+  sources: InstructionSource[]; // 按优先级升序排列
   version: number;
 }
 
@@ -249,6 +249,7 @@ export class InstructionLayer {
     let lastIndex = 0;
     let match: RegExpExecArray | null;
 
+    // biome-ignore lint/suspicious/noAssignInExpressions: idiomatic regex exec loop (assignment in condition is intentional)
     while ((match = includePattern.exec(content)) !== null) {
       const includePath = match[1].trim();
       const resolvedPath = this.resolveIncludePath(includePath, basePath);

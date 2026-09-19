@@ -1,13 +1,13 @@
 ﻿/**
  * Thinking-CLI UI 工具模块
- * 
+ *
  * 提供统一的视觉风格：渐变色、ASCII Art、美化框、样式化输出
  */
 
-import chalk from "chalk";
-import gradient from "gradient-string";
 import boxen from "boxen";
+import chalk from "chalk";
 import figlet from "figlet";
+import gradient from "gradient-string";
 
 // ─── 色彩主题 ───────────────────────────────────────────────
 
@@ -58,15 +58,7 @@ export function generateBanner(): string {
   const version = theme.dim("  v0.4.6");
   const sep = theme.muted("  " + "─".repeat(46));
 
-  return [
-    "",
-    colored,
-    sep,
-    subtitle,
-    version,
-    sep,
-    "",
-  ].join("\n");
+  return ["", colored, sep, subtitle, version, sep, ""].join("\n");
 }
 
 // ─── 启动信息面板 ──────────────────────────────────────────
@@ -99,11 +91,16 @@ export function renderWelcomeInfo(opts: {
 /** 渲染能力档位标签 */
 export function renderCapabilityBadge(level: string): string {
   switch (level) {
-    case "low":    return `${theme.green("●")} ${theme.bold("LOW")}    ${theme.dim("— quick & concise")}`;
-    case "medium": return `${theme.cyan("●")} ${theme.bold("MEDIUM")} ${theme.dim("— balanced")}`;
-    case "high":   return `${theme.magenta("●")} ${theme.bold("HIGH")}   ${theme.dim("— deep reasoning")}`;
-    case "max":    return `${theme.red("●")} ${theme.bold("MAX")}    ${theme.dim("— maximum power")}`;
-    default:       return theme.muted(level);
+    case "low":
+      return `${theme.green("●")} ${theme.bold("LOW")}    ${theme.dim("— quick & concise")}`;
+    case "medium":
+      return `${theme.cyan("●")} ${theme.bold("MEDIUM")} ${theme.dim("— balanced")}`;
+    case "high":
+      return `${theme.magenta("●")} ${theme.bold("HIGH")}   ${theme.dim("— deep reasoning")}`;
+    case "max":
+      return `${theme.red("●")} ${theme.bold("MAX")}    ${theme.dim("— maximum power")}`;
+    default:
+      return theme.muted(level);
   }
 }
 
@@ -130,11 +127,7 @@ export function renderCapabilityList(): string {
     high: "Deep reasoning — complex refactors & architecture",
     max: "Maximum power — hardest problems, no compromise",
   };
-  const lines = [
-    ``,
-    `  ${gradients.aurora("◈ Capability Levels")}`,
-    `  ${theme.muted("─".repeat(44))}`,
-  ];
+  const lines = [``, `  ${gradients.aurora("◈ Capability Levels")}`, `  ${theme.muted("─".repeat(44))}`];
   for (const level of levels) {
     lines.push(`  ${renderCapabilityBadge(level)} ${theme.dim(descriptions[level] ?? "")}`);
   }
@@ -148,10 +141,13 @@ export function renderCapabilityList(): string {
 
 export function renderPrompt(capability?: string): string {
   const capIcon = capability
-    ? capability === "low" ? theme.green("L")
-      : capability === "high" ? theme.magenta("H")
-      : capability === "max" ? theme.red("X")
-      : theme.cyan("M")
+    ? capability === "low"
+      ? theme.green("L")
+      : capability === "high"
+        ? theme.magenta("H")
+        : capability === "max"
+          ? theme.red("X")
+          : theme.cyan("M")
     : theme.cyan("M");
   return `${capIcon}${theme.primary("❯")} `;
 }
@@ -166,37 +162,46 @@ export function renderResult(): string {
 
 // ─── 确认对话框 ────────────────────────────────────────────
 
-export function renderConfirmation(toolCall: { name: string; arguments: Record<string, unknown> }, assessment: { level: string; reason: string; risks: string[] }): string {
+export function renderConfirmation(
+  toolCall: { name: string; arguments: Record<string, unknown> },
+  assessment: { level: string; reason: string; risks: string[] },
+): string {
   const lines: string[] = [];
-  
+
   lines.push(`${theme.warning("  ⚠️  OPERATION REQUIRES CONFIRMATION")}`);
   lines.push(`${theme.muted("  " + "─".repeat(50))}`);
   lines.push(`  ${theme.bold("Tool")}    : ${theme.accent(toolCall.name)}`);
   lines.push(`  ${theme.bold("Command")} : ${theme.dim(JSON.stringify(toolCall.arguments).slice(0, 80))}`);
   lines.push(`  ${theme.bold("Risk")}    : ${renderRiskLevel(assessment.level)}`);
   lines.push(`  ${theme.bold("Reason")}  : ${assessment.reason}`);
-  
+
   if (assessment.risks.length > 0) {
     lines.push(`  ${theme.bold("Risks")}:`);
-    assessment.risks.forEach(r => {
+    assessment.risks.forEach((r) => {
       lines.push(`    ${theme.warning("⚠")} ${r}`);
     });
   }
-  
+
   lines.push(`${theme.muted("  " + "─".repeat(50))}`);
   lines.push(`  ${theme.bold("Allow?")} ${theme.primary("[y]")}es / ${theme.error("[n]")}o`);
-  
+
   return lines.join("\n");
 }
 
 export function renderRiskLevel(level: string): string {
   switch (level) {
-    case "DESTRUCTIVE": return theme.red(`🔴 ${level}`);
-    case "BLOCKED": return theme.red(`🚫 ${level}`);
-    case "EXECUTE": return theme.yellow(`🟡 ${level}`);
-    case "WRITE": return theme.cyan(`🔵 ${level}`);
-    case "READ": return theme.green(`🟢 ${level}`);
-    default: return theme.muted(level);
+    case "DESTRUCTIVE":
+      return theme.red(`🔴 ${level}`);
+    case "BLOCKED":
+      return theme.red(`🚫 ${level}`);
+    case "EXECUTE":
+      return theme.yellow(`🟡 ${level}`);
+    case "WRITE":
+      return theme.cyan(`🔵 ${level}`);
+    case "READ":
+      return theme.green(`🟢 ${level}`);
+    default:
+      return theme.muted(level);
   }
 }
 
@@ -216,7 +221,7 @@ export function renderMetrics(m: {
   durationMs?: number;
 }): string {
   const lines: string[] = [];
-  
+
   lines.push(``);
   lines.push(`${gradients.aurora("  ◈ Run Metrics")}`);
   lines.push(`${theme.muted("  " + "─".repeat(40))}`);
@@ -224,9 +229,13 @@ export function renderMetrics(m: {
   lines.push(`  ${theme.primary("◆")} Status      : ${renderStatus(m.finalStatus)}`);
   lines.push(`  ${theme.primary("◆")} Loops       : ${theme.bold(m.loops.toString())}`);
   lines.push(`  ${theme.primary("◆")} Tool Calls  : ${theme.bold(m.toolCalls.toString())}`);
-  lines.push(`  ${theme.primary("◆")} Retries     : ${m.retries > 0 ? theme.yellow(m.retries.toString()) : theme.success("0")}`);
+  lines.push(
+    `  ${theme.primary("◆")} Retries     : ${m.retries > 0 ? theme.yellow(m.retries.toString()) : theme.success("0")}`,
+  );
   lines.push(`  ${theme.primary("◆")} Reflections : ${theme.bold(m.reflections.toString())}`);
-  lines.push(`  ${theme.primary("◆")} Tokens      : ${theme.cyan(m.totalTokens.toLocaleString())} ${theme.dim(`(${m.promptTokens} in / ${m.completionTokens} out)`)}`);
+  lines.push(
+    `  ${theme.primary("◆")} Tokens      : ${theme.cyan(m.totalTokens.toLocaleString())} ${theme.dim(`(${m.promptTokens} in / ${m.completionTokens} out)`)}`,
+  );
   if (m.compressions > 0) {
     lines.push(`  ${theme.primary("◆")} Compressed  : ${theme.yellow(m.compressions.toString())} messages`);
   }
@@ -234,16 +243,20 @@ export function renderMetrics(m: {
     lines.push(`  ${theme.primary("◆")} Duration    : ${theme.bold((m.durationMs / 1000).toFixed(1))}s`);
   }
   lines.push(`${theme.muted("  " + "─".repeat(40))}`);
-  
+
   return lines.join("\n");
 }
 
 function renderStatus(status: string): string {
   switch (status) {
-    case "completed": return theme.success(`✅ ${status}`);
-    case "failed": return theme.error(`❌ ${status}`);
-    case "running": return theme.primary(`⏳ ${status}`);
-    default: return theme.muted(status);
+    case "completed":
+      return theme.success(`✅ ${status}`);
+    case "failed":
+      return theme.error(`❌ ${status}`);
+    case "running":
+      return theme.primary(`⏳ ${status}`);
+    default:
+      return theme.muted(status);
   }
 }
 

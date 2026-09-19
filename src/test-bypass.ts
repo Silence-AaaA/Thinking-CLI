@@ -2,7 +2,7 @@
  * 测试脚本语言绕过检测（v2 新增）
  */
 
-import { RiskAssessor, RiskLevel, ApprovalDecision } from "./core/risk-assessor.js";
+import { ApprovalDecision, RiskAssessor, RiskLevel } from "./core/risk-assessor.js";
 import type { ToolCall } from "./tools/types.js";
 
 function makeToolCall(name: string, args: Record<string, unknown>): ToolCall {
@@ -57,7 +57,7 @@ async function test() {
     },
     {
       name: "node 正常 console.log（不危险）",
-      command: "node -e \"console.log(1)\"",
+      command: 'node -e "console.log(1)"',
       expectedLevel: RiskLevel.EXECUTE,
       expectedDecision: ApprovalDecision.ALLOW,
     },
@@ -69,7 +69,7 @@ async function test() {
   for (const tc of cases) {
     const result = assessor.assess(makeToolCall("run_shell", { command: tc.command }));
     const ok = result.level === tc.expectedLevel && result.decision === tc.expectedDecision;
-    
+
     if (ok) {
       console.log(`  ✅ ${tc.name} → ${result.level}/${result.decision}`);
       passed++;
@@ -82,16 +82,18 @@ async function test() {
       failed++;
     }
     if (result.risks.length > 0) {
-      result.risks.forEach(r => console.log(`     ⚠️  ${r}`));
+      result.risks.forEach((r) => {
+        console.log(`     ⚠️  ${r}`);
+      });
     }
   }
 
   console.log(`\n  结果: ${passed} 通过, ${failed} 失败\n`);
-  
+
   if (failed > 0) {
     process.exit(1);
   }
-  
+
   console.log("✅ 脚本绕过检测测试通过！\n");
 }
 

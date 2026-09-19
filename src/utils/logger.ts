@@ -1,11 +1,11 @@
 ﻿/**
  * 日志工具
- * 
+ *
  * 【学习要点】
  * 结构化日志是 Agent 系统的"眼睛"。
  * 没有日志，你就不知道 LLM 为什么做了某个决定，
  * 也不知道工具为什么执行失败。
- * 
+ *
  * 设计原则：
  * 1. 结构化：JSON 格式，方便分析
  * 2. 分级：info/warn/error，方便过滤
@@ -38,7 +38,7 @@ class Logger {
   constructor(level: LogLevel = LogLevel.INFO, logDir?: string) {
     this.level = level;
     this.sessionId = Date.now().toString(36);
-    
+
     if (logDir) {
       // 确保日志目录存在
       fs.mkdirSync(logDir, { recursive: true });

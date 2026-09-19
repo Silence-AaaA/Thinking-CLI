@@ -19,8 +19,8 @@
  */
 
 import type { Observation, ObservationSeverity, ObservationStatus } from "../core/observation.js";
-import type { StateMachine, StateSnapshot } from "../core/state-machine.js";
 import type { ReflectionResult } from "../core/reflection.js";
+import type { StateMachine, StateSnapshot } from "../core/state-machine.js";
 import type { TaskPlan } from "../core/task-planner.js";
 import { getLogger } from "../utils/logger.js";
 
@@ -162,15 +162,15 @@ export class AgentNotebookManager {
    */
   updatePlan(plan: TaskPlan): void {
     this.notebook.plan = {
-      steps: plan.steps.map(s => ({
+      steps: plan.steps.map((s) => ({
         id: s.id,
         description: s.description,
         status: s.status as PlanStepSummary["status"],
         result: s.result,
       })),
       currentStepIndex: 0,
-      completedCount: plan.steps.filter(s => s.status === "completed").length,
-      failedCount: plan.steps.filter(s => s.status === "failed").length,
+      completedCount: plan.steps.filter((s) => s.status === "completed").length,
+      failedCount: plan.steps.filter((s) => s.status === "failed").length,
     };
     this.bumpVersion();
     this.logger.info("Notebook", `Plan updated: ${this.notebook.plan.steps.length} steps`);
@@ -189,9 +189,9 @@ export class AgentNotebookManager {
 
     // 更新 plan 中的 step 状态
     if (this.notebook.plan) {
-      const step = this.notebook.plan.steps.find(s => s.id === stepId);
+      const step = this.notebook.plan.steps.find((s) => s.id === stepId);
       if (step) step.status = "active";
-      this.notebook.plan.currentStepIndex = this.notebook.plan.steps.findIndex(s => s.id === stepId);
+      this.notebook.plan.currentStepIndex = this.notebook.plan.steps.findIndex((s) => s.id === stepId);
     }
 
     // 清除 blocked 状态
@@ -208,13 +208,13 @@ export class AgentNotebookManager {
   completeStep(stepId: number, outcome: StepOutcome, summary: string): void {
     // 更新 plan
     if (this.notebook.plan) {
-      const step = this.notebook.plan.steps.find(s => s.id === stepId);
+      const step = this.notebook.plan.steps.find((s) => s.id === stepId);
       if (step) {
         step.status = outcome === "success" ? "completed" : outcome === "failure" ? "failed" : "active";
         step.result = summary.slice(0, 200);
       }
-      this.notebook.plan.completedCount = this.notebook.plan.steps.filter(s => s.status === "completed").length;
-      this.notebook.plan.failedCount = this.notebook.plan.steps.filter(s => s.status === "failed").length;
+      this.notebook.plan.completedCount = this.notebook.plan.steps.filter((s) => s.status === "completed").length;
+      this.notebook.plan.failedCount = this.notebook.plan.steps.filter((s) => s.status === "failed").length;
     }
 
     // 追加 worklog
@@ -302,10 +302,7 @@ export class AgentNotebookManager {
       this.setBlocked(result.diagnosis, result.newStrategy);
     }
     if (result.newStrategy) {
-      this.addDecision(
-        result.newStrategy,
-        `Reflected: ${result.analysis ?? "strategy change"}`,
-      );
+      this.addDecision(result.newStrategy, `Reflected: ${result.analysis ?? "strategy change"}`);
     }
   }
 
@@ -372,7 +369,10 @@ export class AgentNotebookManager {
 
     // Goal
     const statusIcon = {
-      active: "🟢", completed: "✅", failed: "❌", blocked: "🚫",
+      active: "🟢",
+      completed: "✅",
+      failed: "❌",
+      blocked: "🚫",
     }[n.goal.status];
     lines.push(`**Goal**: ${n.goal.primary} ${statusIcon}`);
     if (n.goal.subGoals.length > 0) {
@@ -383,15 +383,17 @@ export class AgentNotebookManager {
     if (n.plan) {
       lines.push(
         `**Plan**: ${n.plan.steps.length} steps | ` +
-        `${n.plan.completedCount} completed | ${n.plan.failedCount} failed | ` +
-        `current: step ${n.plan.currentStepIndex + 1}`
+          `${n.plan.completedCount} completed | ${n.plan.failedCount} failed | ` +
+          `current: step ${n.plan.currentStepIndex + 1}`,
       );
     }
 
     // Current Step
     if (n.currentStep) {
       const elapsed = Math.round((Date.now() - n.currentStep.startedAt) / 1000);
-      lines.push(`**Current Step**: ${n.currentStep.action}${n.currentStep.toolName ? ` (${n.currentStep.toolName})` : ""} [${elapsed}s]`);
+      lines.push(
+        `**Current Step**: ${n.currentStep.action}${n.currentStep.toolName ? ` (${n.currentStep.toolName})` : ""} [${elapsed}s]`,
+      );
     }
 
     // Blocked

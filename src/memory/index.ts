@@ -13,20 +13,60 @@
  * ============================================================
  */
 
-// Layer 1: Instruction Layer
-export { InstructionLayer, type InstructionSource, type InstructionContext, type InstructionLayerConfig } from "./instruction-layer.js";
-
-// Layer 2: Knowledge Layer
-export { KnowledgeStore, type KnowledgeEntry, type KnowledgeType, type KnowledgeScope, type KnowledgeSource, type IndexEntry, type KnowledgeIndex, type KnowledgeStoreConfig } from "./knowledge-layer.js";
-
 // Layer 3: Agent Notebook
-export { AgentNotebookManager, type AgentNotebookData, type GoalState, type PlanState, type StepState, type BlockedState, type Decision, type NotebookObservation, type WorklogEntry, type AgentNotebookConfig } from "./agent-notebook.js";
-
-// Layer 4: Retrieval Engine
-export { RetrievalEngine, MetadataFilter, ImportanceFilter, RecencyFilter, RelevanceRanker, type RetrievalQuery, type RetrievalResult, type ScoredEntry, type RetrievalFilter, type RetrievalRanker, type RetrievalEngineConfig } from "./retrieval-engine.js";
-
-// Layer 5: Prompt Builder
-export { PromptBuilder, type PromptBuilderConfig, type PromptComponents, type AssembleReport, type AssembledPrompt, type AgentType } from "./prompt-builder.js";
-
+export {
+  type AgentNotebookConfig,
+  type AgentNotebookData,
+  AgentNotebookManager,
+  type BlockedState,
+  type Decision,
+  type GoalState,
+  type NotebookObservation,
+  type PlanState,
+  type StepState,
+  type WorklogEntry,
+} from "./agent-notebook.js";
 // Extraction Scheduler
 export { ExtractionScheduler, type ExtractionTriggerConfig } from "./extraction-scheduler.js";
+// Layer 1: Instruction Layer
+export {
+  type InstructionContext,
+  InstructionLayer,
+  type InstructionLayerConfig,
+  type InstructionSource,
+} from "./instruction-layer.js";
+// Layer 2: Knowledge Layer
+export {
+  type IndexEntry,
+  type KnowledgeEntry,
+  type KnowledgeIndex,
+  type KnowledgeScope,
+  type KnowledgeSource,
+  KnowledgeStore,
+  type KnowledgeStoreConfig,
+  type KnowledgeType,
+} from "./knowledge-layer.js";
+
+// Layer 5: Prompt Builder
+export {
+  type AgentType,
+  type AssembledPrompt,
+  type AssembleReport,
+  PromptBuilder,
+  type PromptBuilderConfig,
+  type PromptComponents,
+} from "./prompt-builder.js";
+// Layer 4: Retrieval Engine
+export {
+  ImportanceFilter,
+  MetadataFilter,
+  RecencyFilter,
+  RelevanceRanker,
+  RetrievalEngine,
+  type RetrievalEngineConfig,
+  type RetrievalFilter,
+  type RetrievalQuery,
+  type RetrievalRanker,
+  type RetrievalResult,
+  type ScoredEntry,
+} from "./retrieval-engine.js";

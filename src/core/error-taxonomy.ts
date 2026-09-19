@@ -210,7 +210,7 @@ export class ErrorTaxonomy {
         };
 
       case ErrorType.RATE_LIMIT: {
-        const backoffMs = Math.min(30000, 2000 * Math.pow(2, retryCount));
+        const backoffMs = Math.min(30000, 2000 * 2 ** retryCount);
         return {
           action: RecoveryAction.BACKOFF_AND_RETRY,
           hintForLLM: `Rate limit hit. Wait ${Math.round(backoffMs / 1000)}s before retrying.`,

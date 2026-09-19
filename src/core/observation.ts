@@ -253,7 +253,7 @@ class SearchExtractor implements ObservationExtractor {
 
       return {
         summary: `Found ${total} matches for "${toolCall.arguments?.pattern ?? toolCall.arguments?.query}"`,
-        keyFindings: matches.slice(0, 5).map(m => `${m.file}:${m.line} → ${m.content.trim().slice(0, 80)}`),
+        keyFindings: matches.slice(0, 5).map((m) => `${m.file}:${m.line} → ${m.content.trim().slice(0, 80)}`),
         success: true,
         tokenEstimate: 80,
         status: "success",
@@ -263,15 +263,16 @@ class SearchExtractor implements ObservationExtractor {
           kind: "grep_result",
           pattern: toolCall.arguments?.pattern ?? toolCall.arguments?.query,
           totalMatches: total,
-          topMatches: matches.slice(0, 5).map(m => ({
+          topMatches: matches.slice(0, 5).map((m) => ({
             file: m.file,
             line: m.line,
             preview: m.content.trim().slice(0, 120),
           })),
         },
-        suggestedNextActions: total > 5
-          ? [{ action: "inspect_top_matches", reason: "many matches", priority: "high" }]
-          : [{ action: "continue", priority: "low" }],
+        suggestedNextActions:
+          total > 5
+            ? [{ action: "inspect_top_matches", reason: "many matches", priority: "high" }]
+            : [{ action: "continue", priority: "low" }],
         source: buildSource(toolCall),
       };
     }
@@ -291,9 +292,10 @@ class SearchExtractor implements ObservationExtractor {
         totalFiles: files.length,
         topFiles: files.slice(0, 10),
       },
-      suggestedNextActions: files.length === 0
-        ? [{ action: "broaden_search", reason: "no files found", priority: "high" }]
-        : [{ action: "inspect_candidate_files", priority: "medium" }],
+      suggestedNextActions:
+        files.length === 0
+          ? [{ action: "broaden_search", reason: "no files found", priority: "high" }]
+          : [{ action: "inspect_candidate_files", priority: "medium" }],
       source: buildSource(toolCall),
     };
   }
@@ -312,7 +314,7 @@ class ShellExtractor implements ObservationExtractor {
     const stderr = ((data["stderr"] as string) ?? "").trim();
     const exitCode = data["exitCode"] as number | undefined;
     const durationMs = data["durationMs"] as number | undefined;
-    const command = toolCall.arguments?.command as string ?? "";
+    const command = (toolCall.arguments?.command as string) ?? "";
 
     if (!result.success) {
       const errorType = classifyShellError(exitCode, stderr);
@@ -353,7 +355,13 @@ class ShellExtractor implements ObservationExtractor {
 
     return {
       summary: `Command succeeded (${durationMs ?? "?"}ms): ${command.slice(0, 80)}`,
-      keyFindings: isTestCommand ? testResults : stdout.split("\n").filter(Boolean).slice(-3).map(l => l.trim()),
+      keyFindings: isTestCommand
+        ? testResults
+        : stdout
+            .split("\n")
+            .filter(Boolean)
+            .slice(-3)
+            .map((l) => l.trim()),
       success: true,
       tokenEstimate: 60,
       status: "success",
@@ -445,7 +453,7 @@ class GitExtractor implements ObservationExtractor {
     const lines = ((data["content"] as string) ?? "").split("\n").filter(Boolean);
     return {
       summary: `${toolCall.name}: ${lines.length} lines`,
-      keyFindings: lines.slice(0, 5).map(l => l.trim()),
+      keyFindings: lines.slice(0, 5).map((l) => l.trim()),
       success: true,
       tokenEstimate: 60,
       status: "success",
@@ -454,7 +462,7 @@ class GitExtractor implements ObservationExtractor {
       structuredPayload: {
         kind: toolCall.name,
         lineCount: lines.length,
-        previewLines: lines.slice(0, 8).map(l => l.trim()),
+        previewLines: lines.slice(0, 8).map((l) => l.trim()),
       },
       suggestedNextActions: [{ action: "continue", priority: "low" }],
       source: buildSource(toolCall),
@@ -477,7 +485,8 @@ function buildSource(toolCall: ToolCall, filePath?: string): ObservationSource {
 
 function classifyError(error: string): string {
   const lower = error.toLowerCase();
-  if (lower.includes("enoent") || lower.includes("not found") || lower.includes("no such file")) return "file_not_found";
+  if (lower.includes("enoent") || lower.includes("not found") || lower.includes("no such file"))
+    return "file_not_found";
   if (lower.includes("eacces") || lower.includes("permission")) return "permission_error";
   if (lower.includes("timeout") || lower.includes("timed out")) return "timeout";
   if (lower.includes("429") || lower.includes("rate limit")) return "rate_limit";
@@ -504,11 +513,16 @@ function inferShellSeverity(exitCode: number | undefined, stderr: string): Obser
 function suggestRecovery(toolName: string, error: string): string {
   const errorType = classifyError(error);
   switch (errorType) {
-    case "file_not_found": return "Check the file path. Use list_dir or find_files to locate it.";
-    case "permission_error": return "Permission denied. Check file permissions or try a different path.";
-    case "timeout": return "Operation timed out. Try breaking it into smaller steps.";
-    case "rate_limit": return "Rate limited. Wait a moment before retrying.";
-    default: return "Try a different approach or ask the user for help.";
+    case "file_not_found":
+      return "Check the file path. Use list_dir or find_files to locate it.";
+    case "permission_error":
+      return "Permission denied. Check file permissions or try a different path.";
+    case "timeout":
+      return "Operation timed out. Try breaking it into smaller steps.";
+    case "rate_limit":
+      return "Rate limited. Wait a moment before retrying.";
+    default:
+      return "Try a different approach or ask the user for help.";
   }
 }
 
@@ -533,7 +547,13 @@ function extractTestResults(stdout: string): string[] {
   if (failLine) findings.push(`First failure: ${failLine[0].slice(0, 100)}`);
 
   if (findings.length === 0) {
-    findings.push(...stdout.split("\n").filter(Boolean).slice(-3).map(l => l.trim()));
+    findings.push(
+      ...stdout
+        .split("\n")
+        .filter(Boolean)
+        .slice(-3)
+        .map((l) => l.trim()),
+    );
   }
 
   return findings;
@@ -565,8 +585,7 @@ export class ObservationManager {
   }
 
   observe(toolCall: ToolCall, result: ToolResult): Observation {
-    const extractor =
-      this.extractors.find(e => e.toolNames.includes(toolCall.name)) ?? this.genericExtractor;
+    const extractor = this.extractors.find((e) => e.toolNames.includes(toolCall.name)) ?? this.genericExtractor;
 
     const observation = extractor.extract(toolCall, result);
 
@@ -610,7 +629,9 @@ export class ObservationManager {
       parts.push("");
       parts.push("Suggested next actions:");
       for (const suggestion of observation.suggestedNextActions) {
-        parts.push(`- [${suggestion.priority ?? "medium"}] ${suggestion.action}${suggestion.reason ? ` — ${suggestion.reason}` : ""}`);
+        parts.push(
+          `- [${suggestion.priority ?? "medium"}] ${suggestion.action}${suggestion.reason ? ` — ${suggestion.reason}` : ""}`,
+        );
       }
     } else if (observation.suggestedAction) {
       parts.push(`\nSuggested: ${observation.suggestedAction}`);

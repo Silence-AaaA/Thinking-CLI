@@ -1,23 +1,29 @@
 ﻿import { exec } from "child_process";
 import type { Tool, ToolResult } from "./types.js";
 
-async function gitExec(args: string, maxOutputLength = 3000): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+async function gitExec(
+  args: string,
+  maxOutputLength = 3000,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
-    exec(`git ${args}`, {
-      timeout: 10000,
-      encoding: "utf-8",
-      maxBuffer: 1024 * 1024,
-    }, (error, stdout, stderr) => {
-      const truncatedStdout = stdout.length > maxOutputLength
-        ? stdout.slice(0, maxOutputLength) + "\n... (truncated)"
-        : stdout;
-      
-      resolve({
-        stdout: truncatedStdout,
-        stderr: stderr || "",
-        exitCode: error ? (error.code as number) || 1 : 0,
-      });
-    });
+    exec(
+      `git ${args}`,
+      {
+        timeout: 10000,
+        encoding: "utf-8",
+        maxBuffer: 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        const truncatedStdout =
+          stdout.length > maxOutputLength ? stdout.slice(0, maxOutputLength) + "\n... (truncated)" : stdout;
+
+        resolve({
+          stdout: truncatedStdout,
+          stderr: stderr || "",
+          exitCode: error ? (error.code as number) || 1 : 0,
+        });
+      },
+    );
   });
 }
 
@@ -39,20 +45,20 @@ Use this to understand what changes are pending.`,
     try {
       const branchResult = await gitExec("rev-parse --abbrev-ref HEAD");
       const branch = branchResult.stdout.trim();
-      
+
       const statusResult = await gitExec("status --porcelain");
-      
+
       const staged: string[] = [];
       const unstaged: string[] = [];
       const untracked: string[] = [];
-      
+
       for (const line of statusResult.stdout.split("\n")) {
         if (!line.trim()) continue;
-        
+
         const indexStatus = line[0] ?? "";
         const workTreeStatus = line[1] ?? "";
         const filePath = line.slice(3).trim();
-        
+
         if (indexStatus !== " " && indexStatus !== "?") {
           staged.push(filePath);
         }
@@ -63,7 +69,7 @@ Use this to understand what changes are pending.`,
           untracked.push(filePath);
         }
       }
-      
+
       return {
         success: true,
         data: {
@@ -116,31 +122,31 @@ Use stat=false for full diff (more tokens, but shows actual changes).`,
   },
   execute: async (params): Promise<ToolResult> => {
     try {
-      const staged = params["staged"] as boolean || false;
+      const staged = (params["staged"] as boolean) || false;
       const statOnly = params["stat"] !== false;
       const file = params["file"] as string | undefined;
       const maxLines = (params["maxLines"] as number) || 100;
-      
+
       let cmd = "diff";
       if (staged) cmd += " --cached";
       if (statOnly) cmd += " --stat";
       if (file) cmd += ` -- "${file}"`;
-      
+
       const result = await gitExec(cmd);
-      
+
       if (result.exitCode !== 0) {
         return {
           success: false,
           error: `Git diff failed: ${result.stderr}`,
         };
       }
-      
+
       let output = result.stdout;
       if (!statOnly && output.split("\n").length > maxLines) {
         const lines = output.split("\n").slice(0, maxLines);
         output = lines.join("\n") + "\n... (truncated, use maxLines to see more)";
       }
-      
+
       return {
         success: true,
         data: {
@@ -188,38 +194,44 @@ Use format="detailed" for more info (more tokens).`,
       const limit = (params["limit"] as number) || 10;
       const format = (params["format"] as string) || "compact";
       const file = params["file"] as string | undefined;
-      
+
       let cmd: string;
       if (format === "detailed") {
         cmd = `log -${limit} --pretty=format:"%H|%an|%ad|%s" --date=short`;
       } else {
         cmd = `log -${limit} --oneline`;
       }
-      
+
       if (file) cmd += ` -- "${file}"`;
-      
+
       const result = await gitExec(cmd);
-      
+
       if (result.exitCode !== 0) {
         return {
           success: false,
           error: `Git log failed: ${result.stderr}`,
         };
       }
-      
+
       let commits: unknown[];
       if (format === "detailed") {
-        commits = result.stdout.split("\n").filter(Boolean).map(line => {
-          const [hash, author, date, message] = line.split("|");
-          return { hash, author, date, message };
-        });
+        commits = result.stdout
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => {
+            const [hash, author, date, message] = line.split("|");
+            return { hash, author, date, message };
+          });
       } else {
-        commits = result.stdout.split("\n").filter(Boolean).map(line => {
-          const [hash, ...messageParts] = line.split(" ");
-          return { hash, message: messageParts.join(" ") };
-        });
+        commits = result.stdout
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => {
+            const [hash, ...messageParts] = line.split(" ");
+            return { hash, message: messageParts.join(" ") };
+          });
       }
-      
+
       return {
         success: true,
         data: {

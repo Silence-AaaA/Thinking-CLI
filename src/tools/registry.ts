@@ -1,4 +1,4 @@
-﻿import type { Tool, ToolResult, ToolCall } from "./types.js";
+﻿import type { Tool, ToolCall, ToolResult } from "./types.js";
 
 export class ToolRegistry {
   private tools: Map<string, Tool> = new Map();
@@ -18,7 +18,7 @@ export class ToolRegistry {
       parameters: Tool["parameters"];
     };
   }> {
-    return Array.from(this.tools.values()).map(tool => ({
+    return Array.from(this.tools.values()).map((tool) => ({
       type: "function" as const,
       function: {
         name: tool.name,
@@ -30,7 +30,7 @@ export class ToolRegistry {
 
   async execute(toolCall: ToolCall): Promise<ToolResult> {
     const tool = this.tools.get(toolCall.name);
-    
+
     if (!tool) {
       return {
         success: false,

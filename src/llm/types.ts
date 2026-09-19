@@ -26,7 +26,7 @@ export interface LLMAdapter {
         description: string;
         parameters: unknown;
       };
-    }>
+    }>,
   ): Promise<LLMResponse>;
 
   /** 可选：获取当前模型名 */

@@ -21,7 +21,10 @@
     "test:phase6": "tsx src/test-phase6.ts",
     "test:all": "tsx src/test.ts && tsx src/test-observation.ts && tsx src/test-phase3.ts && tsx src/test-phase3-exec.ts && tsx src/test-phase4.ts && tsx src/test-phase5.ts && tsx src/test-task-router.ts && tsx src/test-bypass.ts && tsx src/test-phase6.ts",
     "test:unit": "vitest run",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "lint": "biome check src",
+    "format": "biome format --write src",
+    "check": "tsc --noEmit && npm run lint && npm test"
   },
   "keywords": [
     "agent",
@@ -32,7 +35,8 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "@vitest/coverage-v8": "^5.0.1",
+    "@biomejs/biome": "^2.5.14",
+    "@vitest/coverage-v8": "^4.1.11",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },

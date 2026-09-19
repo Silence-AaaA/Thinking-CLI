@@ -53,7 +53,10 @@ export class ContextChangelog {
     return this.entries.find((e) => e.contextVersion === contextVersion);
   }
 
-  diffVersions(v1: number, v2: number): {
+  diffVersions(
+    v1: number,
+    v2: number,
+  ): {
     from?: ContextChangeEntry;
     to?: ContextChangeEntry;
     tokenDelta?: number;

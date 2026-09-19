@@ -1,25 +1,25 @@
 ﻿/**
  * 分级审批系统 - 审批网关
- * 
+ *
  * ============================================================
  * 这是工具执行的"守门人"
  * 所有工具调用都必须经过这里
  * ============================================================
- * 
+ *
  * 【设计要点】
  * RiskAssessor 负责"评估风险"
  * ApprovalGateway 负责"根据风险做决定"
- * 
+ *
  * 分离的好处：
  * - 风险评估是纯逻辑，可以单元测试
  * - 审批网关负责和用户交互（如确认弹窗）
  * - 两者可以独立演进
  */
 
+import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolCall, ToolResult } from "../tools/types.js";
-import { ToolRegistry } from "../tools/registry.js";
-import { RiskAssessor, RiskLevel, ApprovalDecision } from "./risk-assessor.js";
 import { getLogger } from "../utils/logger.js";
+import { ApprovalDecision, RiskAssessor, RiskLevel } from "./risk-assessor.js";
 
 /** 审批回调函数类型 */
 export type ApprovalCallback = (
@@ -28,7 +28,7 @@ export type ApprovalCallback = (
     level: RiskLevel;
     reason: string;
     risks: string[];
-  }
+  },
 ) => Promise<boolean>; // true = 用户批准, false = 用户拒绝
 
 /** 审批网关配置 */
@@ -41,7 +41,7 @@ export interface ApprovalGatewayConfig {
 
 /**
  * 审批网关 — 工具执行的守门人
- * 
+ *
  * 【工作流程】
  * 1. LLM 返回 tool_call
  * 2. RiskAssessor 评估风险等级
@@ -52,7 +52,7 @@ export interface ApprovalGatewayConfig {
  *    - DESTRUCTIVE → 调用 onConfirm 回调（可能阻塞等用户）
  *    - BLOCKED → 直接拒绝
  * 4. 执行或拒绝
- * 
+ *
  * 【学习要点】
  * 这个模式叫 "Gateway Pattern" 或 "Middleware Pattern"。
  * 在工具和执行之间插入一个决策层。
@@ -63,7 +63,7 @@ export class ApprovalGateway {
   private assessor: RiskAssessor;
   private config: Required<ApprovalGatewayConfig>;
   private logger = getLogger();
-  
+
   /** 审计日志 */
   private auditLog: Array<{
     timestamp: string;
@@ -75,10 +75,7 @@ export class ApprovalGateway {
     result?: "executed" | "denied" | "error";
   }> = [];
 
-  constructor(
-    registry: ToolRegistry,
-    config?: ApprovalGatewayConfig
-  ) {
+  constructor(registry: ToolRegistry, config?: ApprovalGatewayConfig) {
     this.registry = registry;
     this.assessor = new RiskAssessor();
     this.config = {
@@ -89,7 +86,7 @@ export class ApprovalGateway {
 
   /**
    * 执行工具调用（带审批）
-   * 
+   *
    * 这是对外的唯一接口，替代直接调用 registry.execute()
    */
   async execute(toolCall: ToolCall): Promise<ToolResult> {
@@ -124,15 +121,15 @@ export class ApprovalGateway {
         this.auditLog[this.auditLog.length - 1]!.result = "executed";
         return this.registry.execute(toolCall);
 
-      case ApprovalDecision.CONFIRM:
+      case ApprovalDecision.CONFIRM: {
         // 需要用户确认
         this.logger.warn("ApprovalGateway", `⚠️  Requires confirmation: ${assessment.reason}`);
         if (assessment.risks.length > 0) {
           this.logger.warn("ApprovalGateway", `Risks: ${assessment.risks.join("; ")}`);
         }
-        
+
         const approved = await this.config.onConfirm(toolCall, assessment);
-        
+
         if (approved) {
           this.logger.info("ApprovalGateway", "User approved");
           this.auditLog[this.auditLog.length - 1]!.result = "executed";
@@ -145,6 +142,7 @@ export class ApprovalGateway {
             error: `Operation denied by user: ${assessment.reason}. Try a safer approach.`,
           };
         }
+      }
 
       case ApprovalDecision.DENY:
         // 直接拒绝

@@ -1,6 +1,6 @@
-﻿import type { Tool, ToolResult } from "./types.js";
-import * as fs from "fs/promises";
+﻿import * as fs from "fs/promises";
 import * as path from "path";
+import type { Tool, ToolResult } from "./types.js";
 
 export const grepTool: Tool = {
   name: "grep",
@@ -40,7 +40,7 @@ This is MUCH cheaper than reading entire files.`,
       const searchPath = (params["path"] as string) || ".";
       const maxResults = (params["maxResults"] as number) || 20;
       const contextLines = (params["contextLines"] as number) || 0;
-      
+
       const regex = new RegExp(pattern, "gi");
       const matches: Array<{
         file: string;
@@ -48,17 +48,17 @@ This is MUCH cheaper than reading entire files.`,
         content: string;
         context?: { before: string[]; after: string[] };
       }> = [];
-      
+
       async function searchFile(filePath: string): Promise<void> {
         if (matches.length >= maxResults) return;
-        
+
         try {
           const content = await fs.readFile(filePath, "utf-8");
           const lines = content.split("\n");
-          
+
           for (let i = 0; i < lines.length; i++) {
             if (matches.length >= maxResults) break;
-            
+
             regex.lastIndex = 0;
             if (regex.test(lines[i]!)) {
               const match: {
@@ -71,16 +71,16 @@ This is MUCH cheaper than reading entire files.`,
                 line: i + 1,
                 content: lines[i]!.trim(),
               };
-              
+
               if (contextLines > 0) {
                 const start = Math.max(0, i - contextLines);
                 const end = Math.min(lines.length, i + contextLines + 1);
                 match.context = {
-                  before: lines.slice(start, i).map(l => l.trim()),
-                  after: lines.slice(i + 1, end).map(l => l.trim()),
+                  before: lines.slice(start, i).map((l) => l.trim()),
+                  after: lines.slice(i + 1, end).map((l) => l.trim()),
                 };
               }
-              
+
               matches.push(match);
             }
           }
@@ -88,20 +88,20 @@ This is MUCH cheaper than reading entire files.`,
           // 跳过无法读取的文件
         }
       }
-      
+
       async function searchDir(dirPath: string): Promise<void> {
         if (matches.length >= maxResults) return;
-        
+
         try {
           const entries = await fs.readdir(dirPath, { withFileTypes: true });
-          
+
           for (const entry of entries) {
             if (matches.length >= maxResults) break;
-            
+
             if (entry.name === "node_modules" || entry.name === ".git" || entry.name === "dist") continue;
-            
+
             const fullPath = path.join(dirPath, entry.name);
-            
+
             if (entry.isDirectory()) {
               await searchDir(fullPath);
             } else {
@@ -110,7 +110,7 @@ This is MUCH cheaper than reading entire files.`,
                 const fileRegex = new RegExp(`^${glob}$`);
                 if (!fileRegex.test(entry.name)) continue;
               }
-              
+
               await searchFile(fullPath);
             }
           }
@@ -118,23 +118,24 @@ This is MUCH cheaper than reading entire files.`,
           // 跳过无法访问的目录
         }
       }
-      
+
       const stat = await fs.stat(searchPath);
       if (stat.isFile()) {
         await searchFile(searchPath);
       } else {
         await searchDir(searchPath);
       }
-      
+
       return {
         success: true,
         data: {
           pattern,
           matchesFound: matches.length,
           matches,
-          hint: matches.length > 0
-            ? `Found ${matches.length} matches. Use read_file with line numbers to see full context.`
-            : "No matches found. Try a different pattern or path.",
+          hint:
+            matches.length > 0
+              ? `Found ${matches.length} matches. Use read_file with line numbers to see full context.`
+              : "No matches found. Try a different pattern or path.",
         },
         tokenEstimate: matches.length * 30,
       };
@@ -175,30 +176,30 @@ Returns matching file paths.`,
       const pattern = params["pattern"] as string;
       const searchPath = (params["path"] as string) || ".";
       const maxResults = (params["maxResults"] as number) || 20;
-      
+
       const glob = pattern.replace(/\*/g, ".*").replace(/\?/g, ".");
       const regex = new RegExp(`^${glob}$`, "i");
-      
+
       const matches: string[] = [];
-      
+
       async function findInDir(dirPath: string): Promise<void> {
         if (matches.length >= maxResults) return;
-        
+
         try {
           const entries = await fs.readdir(dirPath, { withFileTypes: true });
-          
+
           for (const entry of entries) {
             if (matches.length >= maxResults) break;
-            
+
             if (entry.name === "node_modules" || entry.name === ".git") continue;
-            
+
             const fullPath = path.join(dirPath, entry.name);
             const relativePath = path.relative(searchPath, fullPath);
-            
+
             if (entry.isFile() && regex.test(entry.name)) {
               matches.push(relativePath);
             }
-            
+
             if (entry.isDirectory()) {
               await findInDir(fullPath);
             }
@@ -207,9 +208,9 @@ Returns matching file paths.`,
           // 跳过无法访问的目录
         }
       }
-      
+
       await findInDir(searchPath);
-      
+
       return {
         success: true,
         data: {

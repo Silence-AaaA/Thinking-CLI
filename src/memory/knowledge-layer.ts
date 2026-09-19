@@ -20,9 +20,9 @@
  * ============================================================
  */
 
-import * as path from "path";
-import * as fs from "fs";
 import * as crypto from "crypto";
+import * as fs from "fs";
+import * as path from "path";
 import { getLogger } from "../utils/logger.js";
 
 // ============================================================
@@ -30,12 +30,12 @@ import { getLogger } from "../utils/logger.js";
 // ============================================================
 
 export type KnowledgeType =
-  | "preference"      // 用户偏好（代码风格、输出格式）
-  | "convention"      // 项目约定（命名规范、目录结构）
-  | "architecture"    // 架构知识（模块关系、数据流）
-  | "experience"      // 经验教训（踩过的坑、有效的策略）
-  | "fact"            // 事实（API 地址、配置值）
-  | "timeline";       // 时间线（做了什么决策、为什么）
+  | "preference" // 用户偏好（代码风格、输出格式）
+  | "convention" // 项目约定（命名规范、目录结构）
+  | "architecture" // 架构知识（模块关系、数据流）
+  | "experience" // 经验教训（踩过的坑、有效的策略）
+  | "fact" // 事实（API 地址、配置值）
+  | "timeline"; // 时间线（做了什么决策、为什么）
 
 export type KnowledgeScope = "global" | "project";
 
@@ -53,8 +53,8 @@ export interface KnowledgeEntry {
   scope: KnowledgeScope;
   content: string;
   reason: string;
-  importance: number;        // 1-5
-  confidence: number;        // 0-1
+  importance: number; // 1-5
+  confidence: number; // 0-1
   source: KnowledgeSource;
   createdAt: number;
   updatedAt: number;
@@ -197,9 +197,9 @@ export class KnowledgeStore {
     if (!ids) {
       // 加载全部
       const index = this.getIndex();
-      return (await Promise.all(index.entries.map(e => this.load(e.id)))).filter(Boolean) as KnowledgeEntry[];
+      return (await Promise.all(index.entries.map((e) => this.load(e.id)))).filter(Boolean) as KnowledgeEntry[];
     }
-    return (await Promise.all(ids.map(id => this.load(id)))).filter(Boolean) as KnowledgeEntry[];
+    return (await Promise.all(ids.map((id) => this.load(id)))).filter(Boolean) as KnowledgeEntry[];
   }
 
   /**
@@ -282,11 +282,14 @@ export class KnowledgeStore {
   /**
    * 从 AgentNotebook 的决策中提取知识
    */
-  extractFromDecision(decision: {
-    decision: string;
-    reason: string;
-    stepId: number;
-  }, sessionId?: string): KnowledgeEntry {
+  extractFromDecision(
+    decision: {
+      decision: string;
+      reason: string;
+      stepId: number;
+    },
+    sessionId?: string,
+  ): KnowledgeEntry {
     return this.createEntry({
       type: "experience",
       scope: "project",
@@ -302,19 +305,20 @@ export class KnowledgeStore {
   /**
    * 从 Observation 中提取知识
    */
-  extractFromObservation(obs: {
-    summary: string;
-    keyFindings: string[];
-    success: boolean;
-    severity: string;
-    stepId: number;
-  }, sessionId?: string): KnowledgeEntry | null {
+  extractFromObservation(
+    obs: {
+      summary: string;
+      keyFindings: string[];
+      success: boolean;
+      severity: string;
+      stepId: number;
+    },
+    sessionId?: string,
+  ): KnowledgeEntry | null {
     // 只提取有价值的信息
     if (obs.severity === "low" && obs.success) return null;
 
-    const content = obs.keyFindings.length > 0
-      ? `${obs.summary}: ${obs.keyFindings.join("; ")}`
-      : obs.summary;
+    const content = obs.keyFindings.length > 0 ? `${obs.summary}: ${obs.keyFindings.join("; ")}` : obs.summary;
 
     return this.createEntry({
       type: obs.success ? "fact" : "experience",
@@ -334,7 +338,9 @@ export class KnowledgeStore {
   // 内部方法
   // ============================================================
 
-  private createEntry(partial: Omit<KnowledgeEntry, "id" | "createdAt" | "updatedAt" | "accessCount" | "lastAccessedAt">): KnowledgeEntry {
+  private createEntry(
+    partial: Omit<KnowledgeEntry, "id" | "createdAt" | "updatedAt" | "accessCount" | "lastAccessedAt">,
+  ): KnowledgeEntry {
     const now = Date.now();
     return {
       id: crypto.randomUUID(),
@@ -348,7 +354,7 @@ export class KnowledgeStore {
 
   private updateIndex(entry: KnowledgeEntry): void {
     const index = this.getIndex();
-    const existing = index.entries.findIndex(e => e.id === entry.id);
+    const existing = index.entries.findIndex((e) => e.id === entry.id);
 
     const indexEntry: IndexEntry = {
       id: entry.id,
@@ -372,7 +378,7 @@ export class KnowledgeStore {
 
   private removeFromIndex(id: string): void {
     const index = this.getIndex();
-    index.entries = index.entries.filter(e => e.id !== id);
+    index.entries = index.entries.filter((e) => e.id !== id);
     index.version++;
     index.updatedAt = Date.now();
     this.saveIndex(index);

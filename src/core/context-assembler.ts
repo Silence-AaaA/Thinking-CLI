@@ -10,12 +10,12 @@
  */
 
 import type { Message } from "../llm/types.js";
+import { getLogger } from "../utils/logger.js";
+import { type ContextChangeEntry, ContextChangelog } from "./context-changelog.js";
+import { type HistoryCheckpoint, HistoryCheckpointManager } from "./history-checkpoints.js";
+import { HistoryCompressor } from "./history-compressor.js";
 import type { StateMachine } from "./state-machine.js";
 import type { WorkingMemory } from "./working-memory.js";
-import { HistoryCompressor } from "./history-compressor.js";
-import { HistoryCheckpointManager, type HistoryCheckpoint } from "./history-checkpoints.js";
-import { ContextChangelog, type ContextChangeEntry } from "./context-changelog.js";
-import { getLogger } from "../utils/logger.js";
 
 export interface ContextAssemblerConfig {
   recentRounds: number;
@@ -89,7 +89,9 @@ export class ContextAssembler {
       recentRounds: this.config.recentRounds,
       minRoundsToCompress: this.config.minRoundsToCompress,
     });
-    this.checkpoints = new HistoryCheckpointManager(this.config.maxHistoryCheckpoints ?? DEFAULT_CONFIG.maxHistoryCheckpoints);
+    this.checkpoints = new HistoryCheckpointManager(
+      this.config.maxHistoryCheckpoints ?? DEFAULT_CONFIG.maxHistoryCheckpoints,
+    );
     this.changelog = new ContextChangelog(this.config.maxContextChangelog ?? DEFAULT_CONFIG.maxContextChangelog);
   }
 
@@ -118,7 +120,7 @@ export class ContextAssembler {
     let compressedCount = 0;
     let droppedForBudget = 0;
     let checkpointCreated = false;
-    let checkpoint: HistoryCheckpoint | undefined = undefined;
+    let checkpoint: HistoryCheckpoint | undefined;
 
     const systemMsgs = rawMessages.filter((m) => m.role === "system");
     const nonSystemMsgs = rawMessages.filter((m) => m.role !== "system");
@@ -225,11 +227,16 @@ export class ContextAssembler {
     }
 
     const memoryVersion = workingMemory.version;
-    if (memoryVersion !== this.lastMemoryVersion) changedBecause.push(`memory_version_changed:${this.lastMemoryVersion}->${memoryVersion}`);
-    if (injectedMemory !== this.lastInjectedMemory) changedBecause.push(`injected_memory:${this.lastInjectedMemory}->${injectedMemory}`);
-    if (injectedState !== this.lastInjectedState) changedBecause.push(`injected_state:${this.lastInjectedState}->${injectedState}`);
-    if (compressedCount !== this.lastCompressedMessages) changedBecause.push(`compressed_messages:${this.lastCompressedMessages}->${compressedCount}`);
-    if (droppedForBudget !== this.lastDroppedForBudget) changedBecause.push(`dropped_for_budget:${this.lastDroppedForBudget}->${droppedForBudget}`);
+    if (memoryVersion !== this.lastMemoryVersion)
+      changedBecause.push(`memory_version_changed:${this.lastMemoryVersion}->${memoryVersion}`);
+    if (injectedMemory !== this.lastInjectedMemory)
+      changedBecause.push(`injected_memory:${this.lastInjectedMemory}->${injectedMemory}`);
+    if (injectedState !== this.lastInjectedState)
+      changedBecause.push(`injected_state:${this.lastInjectedState}->${injectedState}`);
+    if (compressedCount !== this.lastCompressedMessages)
+      changedBecause.push(`compressed_messages:${this.lastCompressedMessages}->${compressedCount}`);
+    if (droppedForBudget !== this.lastDroppedForBudget)
+      changedBecause.push(`dropped_for_budget:${this.lastDroppedForBudget}->${droppedForBudget}`);
     if (changedBecause.length === 0 && this.contextVersion === 0) {
       changedBecause.push("initial_assembly");
     } else if (changedBecause.length === 0) {
@@ -285,7 +292,9 @@ export class ContextAssembler {
     const lines: string[] = ["## Execution State"];
 
     lines.push(`Status: ${snapshot.status}`);
-    lines.push(`Steps: ${snapshot.totalSteps} (completed: ${snapshot.completedSteps.length}, failed: ${snapshot.failedSteps.length})`);
+    lines.push(
+      `Steps: ${snapshot.totalSteps} (completed: ${snapshot.completedSteps.length}, failed: ${snapshot.failedSteps.length})`,
+    );
 
     if (snapshot.retryCount > 0) {
       lines.push(`Retries: ${snapshot.retryCount}`);

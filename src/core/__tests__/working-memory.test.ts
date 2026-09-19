@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the logger before importing WorkingMemory
 vi.mock("../../utils/logger.js", () => ({
@@ -10,8 +10,8 @@ vi.mock("../../utils/logger.js", () => ({
   }),
 }));
 
+import type { Finding, MemorySource, WorkingMemorySnapshot } from "../working-memory.js";
 import { WorkingMemory } from "../working-memory.js";
-import type { MemorySource, Finding, WorkingMemorySnapshot } from "../working-memory.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

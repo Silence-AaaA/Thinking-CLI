@@ -4,9 +4,9 @@
  * 测试 State Machine + Error Taxonomy + Reflection 三大模块
  */
 
-import { StateMachine, ExecutionStatus } from "./core/state-machine.js";
 import { ErrorTaxonomy, ErrorType, RecoveryAction } from "./core/error-taxonomy.js";
 import { ReflectionEngine, ReflectionTrigger } from "./core/reflection.js";
+import { ExecutionStatus, StateMachine } from "./core/state-machine.js";
 
 let passed = 0;
 let failed = 0;
@@ -105,42 +105,42 @@ console.log("\n🧪 Phase 3: Error Taxonomy 测试\n");
   // 超时
   const c1 = et.classify(
     { id: "1", name: "run_shell", arguments: {} },
-    { success: false, error: "Command timed out after 30000ms" }
+    { success: false, error: "Command timed out after 30000ms" },
   );
   assert(c1.type === ErrorType.TIMEOUT, "超时错误正确分类");
 
   // 速率限制
   const c2 = et.classify(
     { id: "2", name: "llm_call", arguments: {} },
-    { success: false, error: "Rate limit exceeded (429)" }
+    { success: false, error: "Rate limit exceeded (429)" },
   );
   assert(c2.type === ErrorType.RATE_LIMIT, "速率限制正确分类");
 
   // 权限
   const c3 = et.classify(
     { id: "3", name: "write_file", arguments: {} },
-    { success: false, error: "EACCES: permission denied" }
+    { success: false, error: "EACCES: permission denied" },
   );
   assert(c3.type === ErrorType.PERMISSION_ERROR, "权限错误正确分类");
 
   // 文件不存在
   const c4 = et.classify(
     { id: "4", name: "read_file", arguments: {} },
-    { success: false, error: "ENOENT: no such file or directory" }
+    { success: false, error: "ENOENT: no such file or directory" },
   );
   assert(c4.type === ErrorType.TOOL_ERROR, "文件不存在分类为 TOOL_ERROR");
 
   // 网络错误
   const c5 = et.classify(
     { id: "5", name: "fetch", arguments: {} },
-    { success: false, error: "ECONNREFUSED 127.0.0.1:3000" }
+    { success: false, error: "ECONNREFUSED 127.0.0.1:3000" },
   );
   assert(c5.type === ErrorType.NETWORK_ERROR, "网络错误正确分类");
 
   // 上下文溢出
   const c6 = et.classify(
     { id: "6", name: "llm_call", arguments: {} },
-    { success: false, error: "This model's maximum context length is 128000 tokens" }
+    { success: false, error: "This model's maximum context length is 128000 tokens" },
   );
   assert(c6.type === ErrorType.CONTEXT_OVERFLOW, "上下文溢出正确分类");
 
@@ -178,8 +178,24 @@ console.log("\n🧪 Phase 3: Reflection Engine 测试\n");
     currentGoal: "read config file",
     completedSteps: [],
     failedSteps: [
-      { id: 1, toolName: "read_file", arguments: { path: "/bad" }, success: false, errorType: "file_not_found", timestamp: Date.now(), durationMs: 10 },
-      { id: 2, toolName: "read_file", arguments: { path: "/bad2" }, success: false, errorType: "file_not_found", timestamp: Date.now(), durationMs: 10 },
+      {
+        id: 1,
+        toolName: "read_file",
+        arguments: { path: "/bad" },
+        success: false,
+        errorType: "file_not_found",
+        timestamp: Date.now(),
+        durationMs: 10,
+      },
+      {
+        id: 2,
+        toolName: "read_file",
+        arguments: { path: "/bad2" },
+        success: false,
+        errorType: "file_not_found",
+        timestamp: Date.now(),
+        durationMs: 10,
+      },
     ],
     retryCount: 2,
     totalSteps: 3,

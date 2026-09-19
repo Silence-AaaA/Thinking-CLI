@@ -124,7 +124,7 @@ export class StateMachine {
     if (!allowed.includes(newStatus)) {
       this.logger.warn(
         "StateMachine",
-        `Illegal transition: ${this._status} -> ${newStatus}. Allowed: [${allowed.join(", ")}]`
+        `Illegal transition: ${this._status} -> ${newStatus}. Allowed: [${allowed.join(", ")}]`,
       );
       return false;
     }

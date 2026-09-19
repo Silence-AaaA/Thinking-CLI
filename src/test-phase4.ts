@@ -4,10 +4,10 @@
  * 测试 Working Memory v2 + History Compressor + Context Assembler v3
  */
 
-import { WorkingMemory } from "./core/working-memory.js";
-import { HistoryCompressor } from "./core/history-compressor.js";
 import { ContextAssembler } from "./core/context-assembler.js";
-import { StateMachine, ExecutionStatus } from "./core/state-machine.js";
+import { HistoryCompressor } from "./core/history-compressor.js";
+import { ExecutionStatus, StateMachine } from "./core/state-machine.js";
+import { WorkingMemory } from "./core/working-memory.js";
 import type { Message } from "./llm/types.js";
 
 let passed = 0;
@@ -70,7 +70,10 @@ console.log("\n🧪 Phase 4.6: Working Memory v2 测试\n");
   wm.setCurrentStep(3);
   wm.tickStep(3);
   const sAfterTick = wm.snapshot();
-  assert(sAfterTick.findings.some((f) => f.strength < 14), "tick 后存在 strength 衰减");
+  assert(
+    sAfterTick.findings.some((f) => f.strength < 14),
+    "tick 后存在 strength 衰减",
+  );
 
   wm.addFinding({
     content: "package.json version is 0.4.6",
@@ -83,7 +86,10 @@ console.log("\n🧪 Phase 4.6: Working Memory v2 测试\n");
   wm.reinforceByFile("package.json", 2);
   const pkgFindings = wm.snapshot().findings.filter((f) => f.file === "package.json");
   assert(pkgFindings.length >= 2, "同一文件可产生多条记忆");
-  assert(pkgFindings.some((f) => f.strength >= 12), "reinforce 后相关记忆强度提升");
+  assert(
+    pkgFindings.some((f) => f.strength >= 12),
+    "reinforce 后相关记忆强度提升",
+  );
 
   wm.demoteByFile("tsconfig.json", 2);
   const tsFindings = wm.snapshot().findings.filter((f) => f.file === "tsconfig.json");
@@ -132,7 +138,11 @@ console.log("\n🧪 Phase 4.6: History Compressor 测试\n");
   const shortMessages: Message[] = [
     { role: "system", content: "You are helpful." },
     { role: "user", content: "read package.json" },
-    { role: "assistant", content: "", tool_calls: [{ id: "1", name: "read_file", arguments: { path: "package.json" } }] },
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "1", name: "read_file", arguments: { path: "package.json" } }],
+    },
     { role: "tool", tool_call_id: "1", content: '{"name":"test"}' },
     { role: "assistant", content: "Here is the file content." },
   ];
@@ -141,7 +151,11 @@ console.log("\n🧪 Phase 4.6: History Compressor 测试\n");
   const longMessages: Message[] = [{ role: "system", content: "You are helpful." }];
   for (let i = 0; i < 10; i++) {
     longMessages.push({ role: "user", content: `task ${i}` });
-    longMessages.push({ role: "assistant", content: "", tool_calls: [{ id: `${i}`, name: "read_file", arguments: { path: `file${i}.ts` } }] });
+    longMessages.push({
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: `${i}`, name: "read_file", arguments: { path: `file${i}.ts` } }],
+    });
     longMessages.push({ role: "tool", tool_call_id: `${i}`, content: `content of file ${i}` });
     longMessages.push({ role: "assistant", content: `Result for task ${i}` });
   }
@@ -154,10 +168,13 @@ console.log("\n🧪 Phase 4.6: History Compressor 测试\n");
   assert(result.summary.length > 0, "摘要不为空");
   assert(result.summary.includes("Conversation History Summary"), "摘要包含标题");
   assert(result.summary.includes("read_file"), "摘要包含工具调用记录");
-  assert(result.recentMessages.some((m) => m.role === "system"), "压缩后保留 system message");
+  assert(
+    result.recentMessages.some((m) => m.role === "system"),
+    "压缩后保留 system message",
+  );
   assert(
     result.recentMessages.some((m) => m.role === "assistant" && (m.content as string).includes("task 9")),
-    "最近轮次内容保留"
+    "最近轮次内容保留",
   );
 }
 
@@ -212,21 +229,43 @@ console.log("\n🧪 Phase 4.6: Context Assembler v3 测试\n");
   assert(r.injectedMemory === true, "注入了 Working Memory");
   assert(r.injectedState === true, "注入了 State Snapshot");
   assert(r.sections.length > 0, "report 包含 sections");
-  assert(r.sections.some((s) => s.name === "working_memory"), "report 包含 working_memory section");
-  assert(r.sections.some((s) => s.name === "state_snapshot"), "report 包含 state_snapshot section");
-  assert(r.sections.some((s) => s.name === "history"), "report 包含 history section");
-  assert(assembled.messages.some((m) => m.role === "user" && m.content.includes("## Working Memory")), "组装后包含 Working Memory");
-  assert(assembled.messages.some((m) => m.role === "user" && m.content.includes("## Execution State")), "组装后包含 State Snapshot");
+  assert(
+    r.sections.some((s) => s.name === "working_memory"),
+    "report 包含 working_memory section",
+  );
+  assert(
+    r.sections.some((s) => s.name === "state_snapshot"),
+    "report 包含 state_snapshot section",
+  );
+  assert(
+    r.sections.some((s) => s.name === "history"),
+    "report 包含 history section",
+  );
+  assert(
+    assembled.messages.some((m) => m.role === "user" && m.content.includes("## Working Memory")),
+    "组装后包含 Working Memory",
+  );
+  assert(
+    assembled.messages.some((m) => m.role === "user" && m.content.includes("## Execution State")),
+    "组装后包含 State Snapshot",
+  );
 
   const emptyWM = new WorkingMemory();
   const assembledEmpty = ca.assemble(shortMessages, emptyWM, sm, 4);
-  assert(assembledEmpty.messages.some((m) => m.role === "user" && m.content.includes("## Working Memory")) === false, "空 Working Memory 不注入");
+  assert(
+    assembledEmpty.messages.some((m) => m.role === "user" && m.content.includes("## Working Memory")) === false,
+    "空 Working Memory 不注入",
+  );
   assert(assembledEmpty.report.injectedMemory === false, "空 Working Memory 在 report 中记录未注入");
 
   const longMessages: Message[] = [{ role: "system", content: "You are a coding agent." }];
   for (let i = 0; i < 10; i++) {
     longMessages.push({ role: "user", content: `task ${i}` });
-    longMessages.push({ role: "assistant", content: "", tool_calls: [{ id: `${i}`, name: "read_file", arguments: { path: `file${i}.ts` } }] });
+    longMessages.push({
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: `${i}`, name: "read_file", arguments: { path: `file${i}.ts` } }],
+    });
     longMessages.push({ role: "tool", tool_call_id: `${i}`, content: `content of file ${i}` });
     longMessages.push({ role: "assistant", content: `Result ${i}` });
   }
@@ -235,7 +274,10 @@ console.log("\n🧪 Phase 4.6: Context Assembler v3 测试\n");
   assert(assembledLong.report.compressedMessages > 0, `长对话压缩了 ${assembledLong.report.compressedMessages} 条消息`);
   assert(assembledLong.report.estimatedTotalTokens > 0, "长对话组装 token > 0");
   assert(assembledLong.messages.length < longMessages.length + 4, "压缩后消息总数减少");
-  assert(assembledLong.report.checkpointCreated === true || assembledLong.report.compressedMessages > 0, "长对话触发压缩或创建 checkpoint");
+  assert(
+    assembledLong.report.checkpointCreated === true || assembledLong.report.compressedMessages > 0,
+    "长对话触发压缩或创建 checkpoint",
+  );
   assert(Array.isArray(assembledLong.report.changedBecause), "长对话 report 包含 changedBecause");
 }
 

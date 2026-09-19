@@ -1,6 +1,6 @@
 /**
  * OpenAI 兼容 LLM 适配器
- * 
+ *
  * 【Phase 1-2 修复项】
  * ① 流式 tool_call 分块到达 → 需要累积 chunk 直到完整 JSON
  * ② tool message 格式 → tool_call_id 必须严格匹配
@@ -8,8 +8,8 @@
  */
 
 import OpenAI from "openai";
-import type { LLMAdapter, LLMResponse, Message } from "./types.js";
 import type { ToolCall } from "../tools/types.js";
+import type { LLMAdapter, LLMResponse, Message } from "./types.js";
 
 export class OpenAIAdapter implements LLMAdapter {
   private client: OpenAI;
@@ -45,7 +45,9 @@ export class OpenAIAdapter implements LLMAdapter {
     const effortEnv = (process.env.DEEPSEEK_REASONING_EFFORT ?? "").toLowerCase();
     this.reasoningEffort =
       config?.reasoningEffort ??
-      (effortEnv === "low" || effortEnv === "medium" || effortEnv === "high" ? (effortEnv as "low" | "medium" | "high") : undefined);
+      (effortEnv === "low" || effortEnv === "medium" || effortEnv === "high"
+        ? (effortEnv as "low" | "medium" | "high")
+        : undefined);
   }
 
   /** 获取当前模型名 */
@@ -67,27 +69,27 @@ export class OpenAIAdapter implements LLMAdapter {
    * 【修复 ②】严格按协议规范构造消息
    */
   private formatMessages(messages: Message[]): OpenAI.ChatCompletionMessageParam[] {
-    return messages.map(msg => {
+    return messages.map((msg) => {
       switch (msg.role) {
         case "system":
           return { role: "system" as const, content: msg.content };
-        
+
         case "user":
           return { role: "user" as const, content: msg.content };
-        
+
         case "tool":
           return {
             role: "tool" as const,
             tool_call_id: msg.tool_call_id,
             content: msg.content,
           };
-        
+
         case "assistant":
           if (msg.tool_calls && msg.tool_calls.length > 0) {
             return {
               role: "assistant" as const,
               content: msg.content || null,
-              tool_calls: msg.tool_calls.map(tc => ({
+              tool_calls: msg.tool_calls.map((tc) => ({
                 id: tc.id,
                 type: "function" as const,
                 function: {
@@ -98,7 +100,7 @@ export class OpenAIAdapter implements LLMAdapter {
             };
           }
           return { role: "assistant" as const, content: msg.content };
-        
+
         default:
           return msg as OpenAI.ChatCompletionMessageParam;
       }
@@ -114,7 +116,7 @@ export class OpenAIAdapter implements LLMAdapter {
         description: string;
         parameters: unknown;
       };
-    }>
+    }>,
   ): Promise<LLMResponse> {
     let lastError: Error | null = null;
 
@@ -146,7 +148,7 @@ export class OpenAIAdapter implements LLMAdapter {
         if (message.tool_calls && message.tool_calls.length > 0) {
           toolCalls = message.tool_calls
             .filter((tc): tc is OpenAI.ChatCompletionMessageFunctionToolCall => tc.type === "function")
-            .map(tc => {
+            .map((tc) => {
               try {
                 return {
                   id: tc.id,
@@ -155,7 +157,7 @@ export class OpenAIAdapter implements LLMAdapter {
                 };
               } catch {
                 throw new Error(
-                  `Failed to parse tool_call arguments for "${tc.function.name}": ${tc.function.arguments}`
+                  `Failed to parse tool_call arguments for "${tc.function.name}": ${tc.function.arguments}`,
                 );
               }
             });
@@ -164,21 +166,23 @@ export class OpenAIAdapter implements LLMAdapter {
         return {
           content: message.content || "",
           toolCalls,
-          usage: response.usage ? {
-            promptTokens: response.usage.prompt_tokens,
-            completionTokens: response.usage.completion_tokens,
-            totalTokens: response.usage.total_tokens,
-          } : undefined,
+          usage: response.usage
+            ? {
+                promptTokens: response.usage.prompt_tokens,
+                completionTokens: response.usage.completion_tokens,
+                totalTokens: response.usage.total_tokens,
+              }
+            : undefined,
         };
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        
+
         if (attempt < this.maxRetries && isRetryableError(lastError)) {
-          const delay = Math.pow(2, attempt) * 1000;
-          await new Promise(resolve => setTimeout(resolve, delay));
+          const delay = 2 ** attempt * 1000;
+          await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
-        
+
         throw new Error(`LLM API call failed after ${attempt + 1} attempts: ${lastError.message}`);
       }
     }

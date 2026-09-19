@@ -22,8 +22,8 @@
  */
 
 import type { LLMAdapter, Message } from "../llm/types.js";
-import type { WorkingMemory } from "./working-memory.js";
 import { getLogger } from "../utils/logger.js";
+import type { WorkingMemory } from "./working-memory.js";
 
 // ============================================================
 // 数据结构
@@ -207,7 +207,6 @@ If needs decomposition:
 3. Prefer 2-3 larger subtasks over many tiny ones
 4. Output ONLY the JSON`;
 
-
 /** Replan 专用 Prompt */
 const REPLAN_PROMPT = `You are a task replanning engine. A step failed. Adjust the remaining plan.
 
@@ -269,16 +268,16 @@ export class TaskPlanner {
       JSON.parse(content);
       return content;
     } catch {}
-    
+
     // 尝试找到第一个 { 开始的完整 JSON 对象
     let depth = 0;
     let start = -1;
-    
+
     for (let i = 0; i < content.length; i++) {
-      if (content[i] === '{') {
+      if (content[i] === "{") {
         if (depth === 0) start = i;
         depth++;
-      } else if (content[i] === '}') {
+      } else if (content[i] === "}") {
         depth--;
         if (depth === 0 && start !== -1) {
           const candidate = content.slice(start, i + 1);
@@ -291,7 +290,7 @@ export class TaskPlanner {
         }
       }
     }
-    
+
     return null;
   }
 
@@ -304,16 +303,16 @@ export class TaskPlanner {
       JSON.parse(content);
       return content;
     } catch {}
-    
+
     // 尝试找到第一个 [ 开始的完整 JSON 数组
     let depth = 0;
     let start = -1;
-    
+
     for (let i = 0; i < content.length; i++) {
-      if (content[i] === '[') {
+      if (content[i] === "[") {
         if (depth === 0) start = i;
         depth++;
-      } else if (content[i] === ']') {
+      } else if (content[i] === "]") {
         depth--;
         if (depth === 0 && start !== -1) {
           const candidate = content.slice(start, i + 1);
@@ -326,7 +325,7 @@ export class TaskPlanner {
         }
       }
     }
-    
+
     return null;
   }
 
@@ -358,10 +357,7 @@ export class TaskPlanner {
     this.logger.info("TaskPlanner", "Phase 4: Execution Plan");
     const steps = this.flattenTree(taskTree);
 
-    this.logger.info(
-      "TaskPlanner",
-      `Plan created: ${steps.length} steps, tree depth=${this.getTreeDepth(taskTree)}`
-    );
+    this.logger.info("TaskPlanner", `Plan created: ${steps.length} steps, tree depth=${this.getTreeDepth(taskTree)}`);
 
     return {
       goal,
@@ -378,10 +374,7 @@ export class TaskPlanner {
   // Phase 1: Goal Analysis
   // ============================================================
 
-  private async analyzeGoal(
-    goal: string,
-    context: string
-  ): Promise<GoalAnalysis> {
+  private async analyzeGoal(goal: string, context: string): Promise<GoalAnalysis> {
     const messages: Message[] = [
       { role: "system", content: GOAL_ANALYSIS_PROMPT },
       { role: "user", content: context },
@@ -436,7 +429,7 @@ export class TaskPlanner {
 
   private async discoverDependencies(
     goalAnalysis: GoalAnalysis,
-    context: string
+    context: string,
   ): Promise<{
     fileDependencies: string[];
     knowledgeDependencies: string[];
@@ -482,15 +475,9 @@ export class TaskPlanner {
     try {
       const parsed = JSON.parse(jsonStr);
       return {
-        fileDependencies: Array.isArray(parsed.fileDependencies)
-          ? parsed.fileDependencies
-          : [],
-        knowledgeDependencies: Array.isArray(parsed.knowledgeDependencies)
-          ? parsed.knowledgeDependencies
-          : [],
-        toolDependencies: Array.isArray(parsed.toolDependencies)
-          ? parsed.toolDependencies
-          : [],
+        fileDependencies: Array.isArray(parsed.fileDependencies) ? parsed.fileDependencies : [],
+        knowledgeDependencies: Array.isArray(parsed.knowledgeDependencies) ? parsed.knowledgeDependencies : [],
+        toolDependencies: Array.isArray(parsed.toolDependencies) ? parsed.toolDependencies : [],
       };
     } catch (e) {
       this.logger.warn("TaskPlanner", `Dependencies parse error: ${e}`);
@@ -520,7 +507,7 @@ export class TaskPlanner {
     dependencies: { fileDependencies: string[]; knowledgeDependencies: string[]; toolDependencies: string[] },
     context: string,
     depth: number,
-    parentId: string = ""
+    parentId: string = "",
   ): Promise<TaskNode> {
     // 停止条件1：达到最大深度
     if (depth >= this.config.maxDecompositionDepth) {
@@ -531,7 +518,10 @@ export class TaskPlanner {
     // 停止条件2：递归调用次数超限
     this.decompositionCallCount++;
     if (this.decompositionCallCount > this.MAX_DECOMPOSITION_CALLS) {
-      this.logger.warn("TaskPlanner", `Max decomposition calls reached (${this.MAX_DECOMPOSITION_CALLS}), making "${title}" atomic`);
+      this.logger.warn(
+        "TaskPlanner",
+        `Max decomposition calls reached (${this.MAX_DECOMPOSITION_CALLS}), making "${title}" atomic`,
+      );
       return this.createAtomicNode(parentId || "1", title, `Execute: ${title}`);
     }
 
@@ -573,20 +563,15 @@ export class TaskPlanner {
       const subtask = decomposition.subtasks[i];
       const childId = parentId ? `${parentId}.${i + 1}` : `${i + 1}`;
 
-      const child = await this.decomposeTask(
-        subtask.title,
-        goalAnalysis,
-        dependencies,
-        context,
-        depth + 1,
-        childId
-      );
+      const child = await this.decomposeTask(subtask.title, goalAnalysis, dependencies, context, depth + 1, childId);
 
       // 设置依赖关系
-      child.dependencies = subtask.dependencies.map((depTitle) => {
-        const depIndex = decomposition.subtasks.findIndex((s) => s.title === depTitle);
-        return depIndex >= 0 ? (parentId ? `${parentId}.${depIndex + 1}` : `${depIndex + 1}`) : "";
-      }).filter(Boolean);
+      child.dependencies = subtask.dependencies
+        .map((depTitle) => {
+          const depIndex = decomposition.subtasks.findIndex((s) => s.title === depTitle);
+          return depIndex >= 0 ? (parentId ? `${parentId}.${depIndex + 1}` : `${depIndex + 1}`) : "";
+        })
+        .filter(Boolean);
 
       children.push(child);
     }
@@ -739,16 +724,8 @@ export class TaskPlanner {
   /**
    * 重新规划（某步失败后）
    */
-  async replan(
-    plan: TaskPlan,
-    failedStep: TaskStep,
-    failureReason: string,
-    memory: WorkingMemory
-  ): Promise<TaskPlan> {
-    this.logger.info(
-      "TaskPlanner",
-      `Replanning after step ${failedStep.id} failed: ${failureReason.slice(0, 80)}`
-    );
+  async replan(plan: TaskPlan, failedStep: TaskStep, failureReason: string, memory: WorkingMemory): Promise<TaskPlan> {
+    this.logger.info("TaskPlanner", `Replanning after step ${failedStep.id} failed: ${failureReason.slice(0, 80)}`);
 
     const stepsSummary = plan.steps
       .map((s) => {
@@ -756,13 +733,11 @@ export class TaskPlanner {
           s.status === "completed"
             ? "DONE"
             : s.status === "failed"
-            ? "FAILED"
-            : s.status === "skipped"
-            ? "SKIPPED"
-            : "PENDING";
-        return `  Step ${s.id} [${status}]: ${s.description}${
-          s.result ? ` -> ${s.result}` : ""
-        }`;
+              ? "FAILED"
+              : s.status === "skipped"
+                ? "SKIPPED"
+                : "PENDING";
+        return `  Step ${s.id} [${status}]: ${s.description}${s.result ? ` -> ${s.result}` : ""}`;
       })
       .join("\n");
 
@@ -795,9 +770,7 @@ export class TaskPlanner {
 
     // 保留已完成步骤的结果
     for (const newStep of newSteps) {
-      const oldStep = plan.steps.find(
-        (s) => s.id === newStep.id && s.status === "completed"
-      );
+      const oldStep = plan.steps.find((s) => s.id === newStep.id && s.status === "completed");
       if (oldStep) {
         newStep.status = "completed";
         newStep.result = oldStep.result;
@@ -812,10 +785,7 @@ export class TaskPlanner {
       version: plan.version + 1,
     };
 
-    this.logger.info(
-      "TaskPlanner",
-      `Replan v${newPlan.version}: ${newSteps.length} steps`
-    );
+    this.logger.info("TaskPlanner", `Replan v${newPlan.version}: ${newSteps.length} steps`);
 
     return newPlan;
   }
@@ -848,5 +818,3 @@ export class TaskPlanner {
     }
   }
 }
-
-

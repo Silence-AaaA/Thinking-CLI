@@ -9,26 +9,33 @@
  * ============================================================
  */
 
-import type { LLMAdapter, Message } from "../llm/types.js";
-import { ToolRegistry } from "../tools/registry.js";
-import type { ToolCall } from "../tools/types.js";
-import { ApprovalGateway, type ApprovalCallback } from "./approval-gateway.js";
-import { ObservationManager } from "./observation.js";
-import { StateMachine, ExecutionStatus } from "./state-machine.js";
-import { ErrorTaxonomy, RecoveryAction } from "./error-taxonomy.js";
-import { ReflectionEngine, type ReflectionJSON } from "./reflection.js";
-import { WorkingMemory } from "./working-memory.js";
-import { ContextAssembler } from "./context-assembler.js";
-import { RuntimeMetrics } from "./runtime-metrics.js";
-import { InstructionLayer, KnowledgeStore, AgentNotebookManager, RetrievalEngine, PromptBuilder, ExtractionScheduler } from "../memory/index.js";
-import { TaskRouter } from "./task-router.js";
-import { TaskPlanner, type TaskPlan } from "./task-planner.js";
-import { StepExecutor, type PlanExecutionResult } from "./step-executor.js";
-import { getLogger } from "../utils/logger.js";
+import { createHash as nodeCreateHash } from "crypto";
 import { homedir } from "os";
 import { join } from "path";
-import { createHash as nodeCreateHash } from "crypto";
 import { type CapabilityProfile, getCapabilityProfile } from "../capabilities.js";
+import type { LLMAdapter, Message } from "../llm/types.js";
+import {
+  AgentNotebookManager,
+  ExtractionScheduler,
+  InstructionLayer,
+  KnowledgeStore,
+  PromptBuilder,
+  RetrievalEngine,
+} from "../memory/index.js";
+import type { ToolRegistry } from "../tools/registry.js";
+import type { ToolCall } from "../tools/types.js";
+import { getLogger } from "../utils/logger.js";
+import { type ApprovalCallback, ApprovalGateway } from "./approval-gateway.js";
+import { ContextAssembler } from "./context-assembler.js";
+import { ErrorTaxonomy, RecoveryAction } from "./error-taxonomy.js";
+import { ObservationManager } from "./observation.js";
+import { ReflectionEngine, type ReflectionJSON } from "./reflection.js";
+import { RuntimeMetrics } from "./runtime-metrics.js";
+import { ExecutionStatus, StateMachine } from "./state-machine.js";
+import { type PlanExecutionResult, StepExecutor } from "./step-executor.js";
+import { type TaskPlan, TaskPlanner } from "./task-planner.js";
+import type { TaskRouter } from "./task-router.js";
+import { WorkingMemory } from "./working-memory.js";
 
 export interface AgentConfig {
   maxIterations?: number;
@@ -110,7 +117,6 @@ class DoomLoopDetector {
   }
 }
 
-
 /** 运行时快照 — 支持 checkpoint / resume / replay */
 export interface RuntimeSnapshot {
   agentState: AgentState;
@@ -164,7 +170,13 @@ export class Agent {
   private promptBuilder!: PromptBuilder;
   private extractionScheduler!: ExtractionScheduler;
   private currentCwd!: string;
-  private knowledgeResult: { entries: any[]; scores: Map<string, number>; strategy: string; totalCandidates: number; filteredCount: number } = { entries: [], scores: new Map(), strategy: "none", totalCandidates: 0, filteredCount: 0 };
+  private knowledgeResult: {
+    entries: any[];
+    scores: Map<string, number>;
+    strategy: string;
+    totalCandidates: number;
+    filteredCount: number;
+  } = { entries: [], scores: new Map(), strategy: "none", totalCandidates: 0, filteredCount: 0 };
 
   constructor(llm: LLMAdapter, tools: ToolRegistry, config?: AgentConfig) {
     this.llm = llm;
@@ -204,9 +216,7 @@ export class Agent {
     this.extractionScheduler = new ExtractionScheduler();
 
     this.state = {
-      messages: [
-        { role: "system", content: this.config.systemPrompt },
-      ],
+      messages: [{ role: "system", content: this.config.systemPrompt }],
       currentStep: 0,
       totalTokens: 0,
       toolCallHistory: [],
@@ -237,7 +247,9 @@ export class Agent {
       if (this.knowledgeResult.entries.length > 0) {
         this.logger.info("Knowledge", `Loaded ${this.knowledgeResult.entries.length} relevant entries`);
       }
-    } catch { /* 首次运行无知识 */ }
+    } catch {
+      /* 首次运行无知识 */
+    }
 
     // 重置状态机（避免 completed -> executing 非法转换）
     this.stateMachine.reset();
@@ -264,13 +276,16 @@ export class Agent {
       this.notebook.beginStep(this.state.currentStep, "llm_turn", undefined);
 
       // === Phase 6: PromptBuilder 组装最终 prompt ===
-      const assembled = this.promptBuilder.build({
-        instruction: instructionCtx,
-        notebook: this.notebook.snapshot(),
-        knowledge: this.knowledgeResult,
-        state: this.stateMachine,
-        rawMessages: this.state.messages,
-      }, this.state.currentStep);
+      const assembled = this.promptBuilder.build(
+        {
+          instruction: instructionCtx,
+          notebook: this.notebook.snapshot(),
+          knowledge: this.knowledgeResult,
+          state: this.stateMachine,
+          rawMessages: this.state.messages,
+        },
+        this.state.currentStep,
+      );
 
       this.lastRunMetrics.recordContextReport({
         compressedMessages: assembled.report.compressedMessages,
@@ -281,13 +296,10 @@ export class Agent {
       this.lastRunMetrics.setTotalSteps(this.stateMachine.snapshot().totalSteps);
       this.logger.info(
         "PromptBuilder",
-        `ctx=${assembled.report.contextVersion}, msgs=${assembled.report.totalMessages}, tokens=${assembled.report.estimatedTotalTokens}, compressed=${assembled.report.compressedMessages}, knowledge=${assembled.report.retrievalCount}, agentType=${assembled.report.agentType}`
+        `ctx=${assembled.report.contextVersion}, msgs=${assembled.report.totalMessages}, tokens=${assembled.report.estimatedTotalTokens}, compressed=${assembled.report.compressedMessages}, knowledge=${assembled.report.retrievalCount}, agentType=${assembled.report.agentType}`,
       );
 
-      const response = await this.llm.chat(
-        assembled.messages,
-        this.tools.getToolDefinitions()
-      );
+      const response = await this.llm.chat(assembled.messages, this.tools.getToolDefinitions());
 
       if (response.usage) {
         this.state.totalTokens += response.usage.totalTokens;
@@ -295,7 +307,7 @@ export class Agent {
         this.lastRunMetrics.recordUsage(
           response.usage.promptTokens ?? 0,
           response.usage.completionTokens ?? 0,
-          response.usage.totalTokens
+          response.usage.totalTokens,
         );
         this.logger.info("Agent", `Tokens: +${response.usage.totalTokens} (total: ${this.state.totalTokens})`);
       }
@@ -346,7 +358,7 @@ export class Agent {
             tool_call_id: toolCall.id,
             content: JSON.stringify({
               error: errorMsg,
-              instruction: "STOP. Do not retry this tool. Tell the user what went wrong."
+              instruction: "STOP. Do not retry this tool. Tell the user what went wrong.",
             }),
           });
           continue;
@@ -372,7 +384,13 @@ export class Agent {
           const filePath = (toolCall.arguments.path as string) ?? undefined;
           this.workingMemory.addFinding({
             content: `Tool ${toolCall.name} succeeded${filePath ? ` for ${filePath}` : ""}`,
-            source: { kind: "tool", toolName: toolCall.name, toolCallId: toolCall.id, stepId: this.state.currentStep, filePath },
+            source: {
+              kind: "tool",
+              toolName: toolCall.name,
+              toolCallId: toolCall.id,
+              stepId: this.state.currentStep,
+              filePath,
+            },
             file: filePath,
             importance: "low",
             confidence: 0.78,
@@ -415,7 +433,13 @@ export class Agent {
           this.workingMemory.addError(`${toolCall.name}: ${classification.type}${failPath ? ` (${failPath})` : ""}`);
           this.workingMemory.addFinding({
             content: `${toolCall.name} failed with ${classification.type}`,
-            source: { kind: "observation", toolName: toolCall.name, toolCallId: toolCall.id, stepId: this.state.currentStep, filePath: failPath },
+            source: {
+              kind: "observation",
+              toolName: toolCall.name,
+              toolCallId: toolCall.id,
+              stepId: this.state.currentStep,
+              filePath: failPath,
+            },
             file: failPath,
             importance: "medium",
             confidence: 0.76,
@@ -492,17 +516,21 @@ export class Agent {
     this.stateMachine.transition(ExecutionStatus.FAILED);
     this.state.messages.push({
       role: "user",
-      content: "You have reached the maximum number of steps. Please summarize what you have done so far and what remains unfinished.",
+      content:
+        "You have reached the maximum number of steps. Please summarize what you have done so far and what remains unfinished.",
     });
 
     try {
-      const finalAssembled = this.promptBuilder.build({
-        instruction: instructionCtx,
-        notebook: this.notebook.snapshot(),
-        knowledge: this.knowledgeResult,
-        state: this.stateMachine,
-        rawMessages: this.state.messages,
-      }, this.state.currentStep);
+      const finalAssembled = this.promptBuilder.build(
+        {
+          instruction: instructionCtx,
+          notebook: this.notebook.snapshot(),
+          knowledge: this.knowledgeResult,
+          state: this.stateMachine,
+          rawMessages: this.state.messages,
+        },
+        this.state.currentStep,
+      );
       const finalResponse = await this.llm.chat(finalAssembled.messages, []);
       return finalResponse.content || `Reached maximum iterations (${this.config.maxIterations}).`;
     } catch {
@@ -544,9 +572,7 @@ export class Agent {
 
   reset(): void {
     this.state = {
-      messages: [
-        { role: "system", content: this.config.systemPrompt },
-      ],
+      messages: [{ role: "system", content: this.config.systemPrompt }],
       currentStep: 0,
       totalTokens: 0,
       toolCallHistory: [],
@@ -610,7 +636,10 @@ export class Agent {
     this.stateMachine.loadSnapshot(snap.stateMachine);
     this.workingMemory.loadSnapshot(snap.workingMemory);
     this.reflectionEngine.loadJSON(snap.reflection);
-    this.logger.info("Agent", `Restored snapshot from ${new Date(snap.timestamp).toISOString()}, step=${snap.agentState.currentStep}`);
+    this.logger.info(
+      "Agent",
+      `Restored snapshot from ${new Date(snap.timestamp).toISOString()}, step=${snap.agentState.currentStep}`,
+    );
   }
 
   /**
@@ -647,7 +676,7 @@ export class Agent {
             result.plan,
             lastFailed,
             lastFailed.result ?? "Step failed",
-            this.workingMemory
+            this.workingMemory,
           );
           result = await this.stepExecutor.executeWithReset(newPlan, this, this.workingMemory);
         } catch (e) {
@@ -658,7 +687,7 @@ export class Agent {
 
     this.logger.info(
       "Agent",
-      `Planned run finished: ${result.completedSteps}/${result.totalSteps} steps, status=${result.finalStatus}`
+      `Planned run finished: ${result.completedSteps}/${result.totalSteps} steps, status=${result.finalStatus}`,
     );
 
     return result;
@@ -697,7 +726,7 @@ export class Agent {
     try {
       // 从 Notebook 决策中提取
       const decisions = this.notebook.getData().decisions;
-      const recentDecisions = decisions.filter(d => d.stepId >= this.state.currentStep - 3);
+      const recentDecisions = decisions.filter((d) => d.stepId >= this.state.currentStep - 3);
       for (const d of recentDecisions) {
         const entry = this.knowledgeStore.extractFromDecision(d, undefined);
         await this.knowledgeStore.save(entry);
@@ -705,13 +734,16 @@ export class Agent {
       }
 
       // 从 Observation 中提取
-      const obsEntry = this.knowledgeStore.extractFromObservation({
-        summary: obs.summary,
-        keyFindings: obs.keyFindings,
-        success: obs.success,
-        severity: obs.severity,
-        stepId: this.state.currentStep,
-      }, undefined);
+      const obsEntry = this.knowledgeStore.extractFromObservation(
+        {
+          summary: obs.summary,
+          keyFindings: obs.keyFindings,
+          success: obs.success,
+          severity: obs.severity,
+          stepId: this.state.currentStep,
+        },
+        undefined,
+      );
       if (obsEntry) {
         await this.knowledgeStore.save(obsEntry);
         this.logger.info("Knowledge", `Extracted observation: ${obsEntry.content.slice(0, 60)}`);
@@ -720,7 +752,7 @@ export class Agent {
       // 刷新检索结果
       this.knowledgeResult = await this.retrievalEngine.retrieve(
         { goal: this.notebook.getData().goal.primary, limit: 5 },
-        this.knowledgeStore
+        this.knowledgeStore,
       );
     } catch (err) {
       this.logger.warn("Knowledge", `Extraction failed: ${err}`);
@@ -729,7 +761,7 @@ export class Agent {
 
   /**
    * 切换能力档位（不换模型，只调参数）
-   * 
+   *
    * 影响：温度、迭代上限、系统提示词深度
    */
   setCapability(level: string): void {
@@ -741,7 +773,10 @@ export class Agent {
     }
     const basePrompt = this.config.systemPrompt.split("\n\n## Mode:")[0];
     this.config.systemPrompt = basePrompt + profile.systemPromptSuffix;
-    this.logger.info("Agent", `Capability: ${profile.label} (temp=${profile.temperature}, iter=${profile.maxIterations})`);
+    this.logger.info(
+      "Agent",
+      `Capability: ${profile.label} (temp=${profile.temperature}, iter=${profile.maxIterations})`,
+    );
   }
 
   /** 获取当前能力档位 */
@@ -749,36 +784,3 @@ export class Agent {
     return this.currentCapability;
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

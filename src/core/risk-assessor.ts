@@ -1,8 +1,8 @@
 ﻿/**
  * 分级审批系统 - 操作风险评估
- * 
+ *
  * Phase 2 | 已实现
- * 
+ *
  * 【v2 修正】
  * - 新增：检测通过脚本语言绕过安全机制的行为
  * - 例：python -c "os.remove('file')" 和 rm 等价，应该同样需要确认
@@ -104,7 +104,7 @@ export class RiskAssessor {
 
   /**
    * Shell 命令评估
-   * 
+   *
    * 【v2 新增】检测通过脚本语言绕过安全机制的行为
    * 例如：python -c "os.remove('file')" 等价于 rm，应该同样处理
    */
@@ -114,7 +114,7 @@ export class RiskAssessor {
 
     // === 直接拒绝 ===
     const blockedPatterns = [
-      { pattern: /rm\s+-rf\s+[\/\\]/i, reason: "Recursive delete from root" },
+      { pattern: /rm\s+-rf\s+[/\\]/i, reason: "Recursive delete from root" },
       { pattern: />\s*\/dev\//i, reason: "Writing to device files" },
       { pattern: /mkfs/i, reason: "Format filesystem" },
       { pattern: /dd\s+.*of=/i, reason: "Direct disk write" },
@@ -124,7 +124,12 @@ export class RiskAssessor {
     ];
     for (const { pattern, reason } of blockedPatterns) {
       if (pattern.test(command)) {
-        return { level: RiskLevel.BLOCKED, decision: ApprovalDecision.DENY, reason: `Blocked: ${reason}`, risks: [reason] };
+        return {
+          level: RiskLevel.BLOCKED,
+          decision: ApprovalDecision.DENY,
+          reason: `Blocked: ${reason}`,
+          risks: [reason],
+        };
       }
     }
 
@@ -165,7 +170,7 @@ export class RiskAssessor {
 
   /**
    * 【v2 新增】检测通过脚本语言绕过安全机制的行为
-   * 
+   *
    * LLM 很聪明——如果 rm 被拦了，它会用 python/node 来做同样的事。
    * 我们需要检测这种"等价危险操作"。
    */
@@ -193,7 +198,7 @@ export class RiskAssessor {
     // 检测文件覆写
     const overwritePatterns = [
       { pattern: /fs\.writeFileSync/i, reason: "Node.js file write" },
-      { pattern: /open\(.*['\"]w['\"]/, reason: "Python file overwrite" },
+      { pattern: /open\(.*['"]w['"]/, reason: "Python file overwrite" },
     ];
 
     for (const { pattern, reason } of overwritePatterns) {

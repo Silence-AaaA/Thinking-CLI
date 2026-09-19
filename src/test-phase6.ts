@@ -10,16 +10,16 @@
  * - Extraction Scheduler（双阈值触发）
  */
 
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { ExecutionStatus, StateMachine } from "./core/state-machine.js";
+import { AgentNotebookManager } from "./memory/agent-notebook.js";
+import { ExtractionScheduler } from "./memory/extraction-scheduler.js";
 import { InstructionLayer } from "./memory/instruction-layer.js";
 import { KnowledgeStore } from "./memory/knowledge-layer.js";
-import { AgentNotebookManager } from "./memory/agent-notebook.js";
-import { RetrievalEngine, MetadataFilter, ImportanceFilter, RelevanceRanker } from "./memory/retrieval-engine.js";
 import { PromptBuilder } from "./memory/prompt-builder.js";
-import { ExtractionScheduler } from "./memory/extraction-scheduler.js";
-import { StateMachine, ExecutionStatus } from "./core/state-machine.js";
-import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
+import { ImportanceFilter, MetadataFilter, RelevanceRanker, RetrievalEngine } from "./memory/retrieval-engine.js";
 
 let passed = 0;
 let failed = 0;
@@ -62,7 +62,7 @@ const instructionLayer = new InstructionLayer({
 // 测试：优先级排序
 {
   const ctx = await instructionLayer.discover(process.cwd(), "managed prompt");
-  const priorities = ctx.sources.map(s => s.priority);
+  const priorities = ctx.sources.map((s) => s.priority);
   const sorted = [...priorities].sort((a, b) => a - b);
   assert(JSON.stringify(priorities) === JSON.stringify(sorted), "Sources sorted by priority ascending");
 }
@@ -500,14 +500,8 @@ const promptBuilder = new PromptBuilder({ agentType: "coding" });
   assert(result.report.agentType === "coding", "Report has correct agent type");
   assert(result.report.totalMessages > 0, "Report has total message count");
   assert(result.messages[0].role === "system", "First message is system");
-  assert(
-    (result.messages[0].content as string).includes("coding agent"),
-    "System prompt includes managed instruction"
-  );
-  assert(
-    (result.messages[0].content as string).includes("git_diff"),
-    "System prompt includes coding addendum"
-  );
+  assert((result.messages[0].content as string).includes("coding agent"), "System prompt includes managed instruction");
+  assert((result.messages[0].content as string).includes("git_diff"), "System prompt includes coding addendum");
 }
 
 // 测试：research 类型
@@ -524,7 +518,7 @@ const promptBuilder = new PromptBuilder({ agentType: "coding" });
 
   assert(
     (result.messages[0].content as string).includes("Cite sources"),
-    "Research builder includes research addendum"
+    "Research builder includes research addendum",
   );
 }
 
@@ -657,11 +651,13 @@ section("Integration: Knowledge + Retrieval");
   assert(result.entries.length === 2, `Retrieved 2 experience entries (got ${result.entries.length})`);
 
   // 验证 reason 存在
-  const hasReason = result.entries.every(e => e.reason.length > 0);
+  const hasReason = result.entries.every((e) => e.reason.length > 0);
   assert(hasReason, "All retrieved entries have reason field");
 
   // 清理
-  try { fs.rmSync(integrationRoot, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(integrationRoot, { recursive: true, force: true });
+  } catch {}
 }
 
 // ============================================================
@@ -677,5 +673,3 @@ console.log(`  Total: ${passed + failed}`);
 if (failed > 0) {
   process.exit(1);
 }
-
-

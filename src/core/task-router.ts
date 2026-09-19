@@ -21,8 +21,8 @@
  */
 
 import type { LLMAdapter, Message } from "../llm/types.js";
-import type { WorkingMemory } from "./working-memory.js";
 import { getLogger } from "../utils/logger.js";
+import type { WorkingMemory } from "./working-memory.js";
 
 /** 路由结果 */
 export type RouteResult = "direct" | "planner";
@@ -120,10 +120,7 @@ export class TaskRouter {
     // 调用 LLM 判断
     const analysis = await this.analyzeGoal(goal, memory);
 
-    this.logger.info(
-      "TaskRouter",
-      `Decision: ${analysis.execution_mode} - ${analysis.reason}`
-    );
+    this.logger.info("TaskRouter", `Decision: ${analysis.execution_mode} - ${analysis.reason}`);
 
     return analysis.execution_mode === "PLAN" ? "planner" : "direct";
   }
@@ -131,10 +128,7 @@ export class TaskRouter {
   /**
    * 分析目标，返回执行模式
    */
-  private async analyzeGoal(
-    goal: string,
-    memory: WorkingMemory
-  ): Promise<RouteAnalysis> {
+  private async analyzeGoal(goal: string, memory: WorkingMemory): Promise<RouteAnalysis> {
     const context = memory.formatForPlanning();
 
     const messages: Message[] = [

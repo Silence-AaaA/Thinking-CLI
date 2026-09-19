@@ -1,6 +1,6 @@
-﻿import type { Tool, ToolResult } from "./types.js";
-import * as fs from "fs/promises";
+﻿import * as fs from "fs/promises";
 import * as path from "path";
+import type { Tool, ToolResult } from "./types.js";
 
 export const fileSummaryTool: Tool = {
   name: "file_summary",
@@ -23,27 +23,27 @@ Returns: line count, language, main exports/functions.`,
       const filePath = params["path"] as string;
       const content = await fs.readFile(filePath, "utf-8");
       const lines = content.split("\n");
-      
+
       const functions: string[] = [];
       const classes: string[] = [];
       const exports: string[] = [];
-      
+
       for (const line of lines) {
         const trimmed = line.trim();
         const funcMatch = trimmed.match(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)/);
         if (funcMatch) functions.push(funcMatch[1]!);
-        
+
         const classMatch = trimmed.match(/^(?:export\s+)?class\s+(\w+)/);
         if (classMatch) classes.push(classMatch[1]!);
-        
+
         if (trimmed.startsWith("export ")) {
           const exportMatch = trimmed.match(/export\s+(?:default\s+)?(?:function|class|const|let|var)\s+(\w+)/);
           if (exportMatch) exports.push(exportMatch[1]!);
         }
       }
-      
+
       const ext = path.extname(filePath);
-      
+
       return {
         success: true,
         data: {
@@ -95,19 +95,16 @@ Tip: Use file_summary first to understand structure, then read specific sections
       const start = Math.max(1, (params["start"] as number) || 1);
       const defaultEnd = start + 199;
       const maxEnd = params["end"] as number | undefined;
-      
+
       const content = await fs.readFile(filePath, "utf-8");
       const allLines = content.split("\n");
       const totalLines = allLines.length;
-      
-      const end = Math.min(
-        maxEnd ?? defaultEnd,
-        totalLines
-      );
-      
+
+      const end = Math.min(maxEnd ?? defaultEnd, totalLines);
+
       const selectedLines = allLines.slice(start - 1, end);
       const truncated = end < totalLines;
-      
+
       return {
         success: true,
         data: {
@@ -116,7 +113,7 @@ Tip: Use file_summary first to understand structure, then read specific sections
             totalLines,
             showing: `lines ${start}-${end}`,
             truncated,
-            hint: truncated 
+            hint: truncated
               ? `File has ${totalLines} lines. Showing ${selectedLines.length} lines. Use start/end to read other sections.`
               : "Showing complete file.",
           },
@@ -154,12 +151,12 @@ Warning: This will overwrite existing content. Use read_file first to check curr
     try {
       const filePath = params["path"] as string;
       const content = params["content"] as string;
-      
+
       const dir = path.dirname(filePath);
       await fs.mkdir(dir, { recursive: true });
-      
+
       await fs.writeFile(filePath, content, "utf-8");
-      
+
       return {
         success: true,
         data: {
@@ -199,23 +196,21 @@ Returns file names, sizes, and whether each entry is a file or directory.`,
     try {
       const dirPath = (params["path"] as string) || ".";
       const maxDepth = (params["maxDepth"] as number) || 1;
-      
+
       async function listRecursive(currentPath: string, depth: number): Promise<unknown[]> {
         if (depth > maxDepth) return [];
-        
+
         const entries = await fs.readdir(currentPath, { withFileTypes: true });
         const result = [];
-        
+
         for (const entry of entries) {
           if (entry.name === "node_modules" || entry.name === ".git") continue;
-          
+
           const fullPath = path.join(currentPath, entry.name);
           const relativePath = path.relative(dirPath, fullPath);
-          
+
           if (entry.isDirectory()) {
-            const children = depth < maxDepth 
-              ? await listRecursive(fullPath, depth + 1) 
-              : [];
+            const children = depth < maxDepth ? await listRecursive(fullPath, depth + 1) : [];
             result.push({
               name: entry.name,
               path: relativePath,
@@ -232,12 +227,12 @@ Returns file names, sizes, and whether each entry is a file or directory.`,
             });
           }
         }
-        
+
         return result;
       }
-      
+
       const entries = await listRecursive(dirPath, 0);
-      
+
       return {
         success: true,
         data: {

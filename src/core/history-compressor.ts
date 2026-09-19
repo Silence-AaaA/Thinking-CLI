@@ -244,4 +244,3 @@ export class HistoryCompressor {
     return parts.join("\n");
   }
 }
-

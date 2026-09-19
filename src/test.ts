@@ -1,14 +1,14 @@
 ﻿/**
  * 验证 Agent Loop 的基本逻辑（不依赖 API）
- * 
+ *
  * 这个测试文件验证核心架构是否正确：
  * 1. 工具注册表能正常工作
  * 2. 工具能正常执行
  * 3. Agent 循环逻辑完整
  */
 
-import { ToolRegistry } from "./tools/registry.js";
 import { fileTools } from "./tools/file-tools.js";
+import { ToolRegistry } from "./tools/registry.js";
 import { searchTools } from "./tools/search-tools.js";
 
 async function testToolRegistry() {
@@ -17,7 +17,9 @@ async function testToolRegistry() {
   const registry = new ToolRegistry();
 
   // 注册工具
-  [...fileTools, ...searchTools].forEach(tool => registry.register(tool));
+  [...fileTools, ...searchTools].forEach((tool) => {
+    registry.register(tool);
+  });
   console.log("✓ 注册工具:", registry.listTools().join(", "));
 
   // 获取工具定义（这会发给 LLM）
@@ -30,7 +32,9 @@ async function testListDir() {
   console.log("=== 测试 list_dir 工具 ===\n");
 
   const registry = new ToolRegistry();
-  fileTools.forEach(tool => registry.register(tool));
+  fileTools.forEach((tool) => {
+    registry.register(tool);
+  });
 
   const result = await registry.execute({
     id: "test-1",
@@ -53,7 +57,9 @@ async function testGrep() {
   console.log("=== 测试 grep 工具 ===\n");
 
   const registry = new ToolRegistry();
-  searchTools.forEach(tool => registry.register(tool));
+  searchTools.forEach((tool) => {
+    registry.register(tool);
+  });
 
   const result = await registry.execute({
     id: "test-2",
@@ -76,7 +82,9 @@ async function testFileSummary() {
   console.log("=== 测试 file_summary 工具 ===\n");
 
   const registry = new ToolRegistry();
-  fileTools.forEach(tool => registry.register(tool));
+  fileTools.forEach((tool) => {
+    registry.register(tool);
+  });
 
   const result = await registry.execute({
     id: "test-3",

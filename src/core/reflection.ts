@@ -23,9 +23,9 @@
  * ============================================================
  */
 
-import type { StepRecord, StateSnapshot } from "./state-machine.js";
-import type { ErrorType, RecoveryAction } from "./error-taxonomy.js";
 import { getLogger } from "../utils/logger.js";
+import type { ErrorType, RecoveryAction } from "./error-taxonomy.js";
+import type { StateSnapshot, StepRecord } from "./state-machine.js";
 
 /** 反思触发原因 */
 export enum ReflectionTrigger {
@@ -160,11 +160,7 @@ export class ReflectionEngine {
   /**
    * 生成反思 prompt（注入到 LLM 消息中）
    */
-  generateReflectionPrompt(
-    snapshot: StateSnapshot,
-    trigger: ReflectionTrigger,
-    recentFailures: StepRecord[]
-  ): string {
+  generateReflectionPrompt(snapshot: StateSnapshot, trigger: ReflectionTrigger, recentFailures: StepRecord[]): string {
     const failureSummary = recentFailures
       .slice(-5)
       .map((f) => `  - Step ${f.id}: ${f.toolName} -> ${f.errorType ?? "unknown error"}`)
@@ -221,7 +217,7 @@ export class ReflectionEngine {
         promptForLLM: this.generateReflectionPrompt(
           snapshot,
           ReflectionTrigger.CONSECUTIVE_FAILURES,
-          snapshot.failedSteps
+          snapshot.failedSteps,
         ),
       };
     }
@@ -229,21 +225,14 @@ export class ReflectionEngine {
   }
 
   private checkTooManySteps(snapshot: StateSnapshot): ReflectionResult {
-    if (
-      snapshot.totalSteps >= this.config.maxStepsBeforeReflection &&
-      snapshot.status !== "completed"
-    ) {
+    if (snapshot.totalSteps >= this.config.maxStepsBeforeReflection && snapshot.status !== "completed") {
       return {
         shouldReflect: true,
         trigger: ReflectionTrigger.TOO_MANY_STEPS,
         analysis: `${snapshot.totalSteps} steps taken but goal not completed`,
         diagnosis: "The approach may be too broad or inefficient",
         newStrategy: "Focus on the core requirement and avoid unnecessary exploration",
-        promptForLLM: this.generateReflectionPrompt(
-          snapshot,
-          ReflectionTrigger.TOO_MANY_STEPS,
-          snapshot.failedSteps
-        ),
+        promptForLLM: this.generateReflectionPrompt(snapshot, ReflectionTrigger.TOO_MANY_STEPS, snapshot.failedSteps),
       };
     }
     return { shouldReflect: false };

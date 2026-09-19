@@ -7,45 +7,43 @@
  */
 
 import { Command } from "commander";
+import * as dotenv from "dotenv";
 import * as readline from "readline";
+import { getCapabilityProfile } from "../capabilities.js";
+import { getConfigPaths, loadConfig, saveProjectConfig } from "../config.js";
 import { Agent } from "../core/agent.js";
+import type { RiskLevel } from "../core/risk-assessor.js";
 import type { PlanExecutionResult } from "../core/step-executor.js";
-import { ToolRegistry } from "../tools/registry.js";
+import { OpenAIAdapter } from "../llm/openai-adapter.js";
 import { fileTools } from "../tools/file-tools.js";
+import { gitTools } from "../tools/git-tools.js";
+import { ToolRegistry } from "../tools/registry.js";
 import { searchTools } from "../tools/search-tools.js";
 import { shellTools } from "../tools/shell-tool.js";
-import { gitTools } from "../tools/git-tools.js";
-import { OpenAIAdapter } from "../llm/openai-adapter.js";
-import { initLogger, LogLevel } from "../utils/logger.js";
-import { getCapabilityProfile } from "../capabilities.js";
-import { loadConfig, saveProjectConfig, getConfigPaths } from "../config.js";
-import {
-  theme,
-  gradients,
-  generateBanner,
-  renderWelcomeInfo,
-  renderPrompt,
-  renderThinking,
-  renderResult,
-  renderConfirmation,
-  renderMetrics,
-  renderError,
-  renderRiskLevel,
-  renderCapabilitySwitch,
-  renderCapabilityList, renderCapabilityBadge,
-} from "../utils/ui.js";
 import type { ToolCall } from "../tools/types.js";
-import type { RiskLevel } from "../core/risk-assessor.js";
-import * as dotenv from "dotenv";
+import { initLogger, LogLevel } from "../utils/logger.js";
+import {
+  generateBanner,
+  gradients,
+  renderCapabilityBadge,
+  renderCapabilityList,
+  renderCapabilitySwitch,
+  renderConfirmation,
+  renderError,
+  renderMetrics,
+  renderPrompt,
+  renderResult,
+  renderRiskLevel,
+  renderThinking,
+  renderWelcomeInfo,
+  theme,
+} from "../utils/ui.js";
 
 dotenv.config();
 
 const program = new Command();
 
-program
-  .name("thinking-agent")
-  .description("A CLI coding agent built for learning Agent architecture")
-  .version("0.4.6");
+program.name("thinking-agent").description("A CLI coding agent built for learning Agent architecture").version("0.4.6");
 
 program
   .argument("[task]", "Task to execute (omit for REPL mode)")
@@ -70,7 +68,7 @@ program
     const logger = initLogger(logLevel, options.logDir);
 
     const registry = new ToolRegistry();
-    [...fileTools, ...searchTools, ...shellTools, ...gitTools].forEach(tool => {
+    [...fileTools, ...searchTools, ...shellTools, ...gitTools].forEach((tool) => {
       registry.register(tool);
     });
 
@@ -82,13 +80,15 @@ program
     const isRepl = options.repl || !task;
 
     console.log(generateBanner());
-    console.log(renderWelcomeInfo({
-      model,
-      tools: registry.listTools().length,
-      approval: enableApproval,
-      repl: isRepl,
-      capability: capProfile.level,
-    }));
+    console.log(
+      renderWelcomeInfo({
+        model,
+        tools: registry.listTools().length,
+        approval: enableApproval,
+        repl: isRepl,
+        capability: capProfile.level,
+      }),
+    );
 
     if (isRepl) {
       await startREPL(llm, registry, { enableApproval, logger, options, capabilityLevel: capProfile.level });
@@ -104,8 +104,11 @@ function createAgent(
     enableApproval: boolean;
     options: Record<string, unknown>;
     capabilityLevel: string;
-    onConfirm?: (toolCall: ToolCall, assessment: { level: RiskLevel; reason: string; risks: string[] }) => Promise<boolean>;
-  }
+    onConfirm?: (
+      toolCall: ToolCall,
+      assessment: { level: RiskLevel; reason: string; risks: string[] },
+    ) => Promise<boolean>;
+  },
 ): Agent {
   const capProfile = getCapabilityProfile(opts.capabilityLevel);
   const explicitIterations = opts.options["maxIterations"] as string | undefined;
@@ -133,16 +136,27 @@ async function executeTask(
   llm: OpenAIAdapter,
   registry: ToolRegistry,
   task: string,
-  opts: { enableApproval: boolean; logger: ReturnType<typeof initLogger>; options: Record<string, unknown>; capabilityLevel: string }
+  opts: {
+    enableApproval: boolean;
+    logger: ReturnType<typeof initLogger>;
+    options: Record<string, unknown>;
+    capabilityLevel: string;
+  },
 ): Promise<void> {
   opts.logger.info("CLI", `Task: ${task} [capability=${opts.capabilityLevel}]`);
   console.log(renderThinking());
 
   const onConfirm = async (
     toolCall: ToolCall,
-    assessment: { level: RiskLevel; reason: string; risks: string[] }
+    assessment: { level: RiskLevel; reason: string; risks: string[] },
   ): Promise<boolean> => {
-    console.log(renderConfirmation(toolCall, { level: assessment.level as string, reason: assessment.reason, risks: assessment.risks }));
+    console.log(
+      renderConfirmation(toolCall, {
+        level: assessment.level as string,
+        reason: assessment.reason,
+        risks: assessment.risks,
+      }),
+    );
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await new Promise<string>((resolve) => {
       rl.question(renderPrompt(opts.capabilityLevel), (a) => {
@@ -177,7 +191,12 @@ async function executeTask(
 async function startREPL(
   llm: OpenAIAdapter,
   registry: ToolRegistry,
-  opts: { enableApproval: boolean; logger: ReturnType<typeof initLogger>; options: Record<string, unknown>; capabilityLevel: string }
+  opts: {
+    enableApproval: boolean;
+    logger: ReturnType<typeof initLogger>;
+    options: Record<string, unknown>;
+    capabilityLevel: string;
+  },
 ): Promise<void> {
   let currentCapLevel = opts.capabilityLevel;
 
@@ -192,7 +211,13 @@ async function startREPL(
     options: opts.options,
     capabilityLevel: currentCapLevel,
     onConfirm: async (toolCall, assessment) => {
-      console.log(renderConfirmation(toolCall, { level: assessment.level as string, reason: assessment.reason, risks: assessment.risks }));
+      console.log(
+        renderConfirmation(toolCall, {
+          level: assessment.level as string,
+          reason: assessment.reason,
+          risks: assessment.risks,
+        }),
+      );
       const answer = await askUserVia(rl, renderPrompt(currentCapLevel));
       return answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
     },
@@ -238,7 +263,9 @@ async function startREPL(
       console.log(`\n  ${gradients.aurora("◈ Config")}`);
       console.log(theme.muted("  " + "─".repeat(48)));
       console.log(`  ${theme.primary("◆")} Current capability: ${renderCapabilityBadge(currentCapLevel)}`);
-      console.log(`  ${theme.primary("◆")} Project config: ${paths.project ? theme.success(paths.project) : theme.muted("not found")}`);
+      console.log(
+        `  ${theme.primary("◆")} Project config: ${paths.project ? theme.success(paths.project) : theme.muted("not found")}`,
+      );
       console.log(`  ${theme.primary("◆")} User config:    ${theme.dim(paths.user)}`);
       console.log(theme.muted("  " + "─".repeat(48)));
       console.log();
@@ -257,7 +284,9 @@ async function startREPL(
     if (input === "cap save" || input === "capability save") {
       try {
         saveProjectConfig({ defaultCapability: currentCapLevel as any });
-        console.log(`\n  ${theme.success("✅")} Saved ${renderCapabilityBadge(currentCapLevel)} as default to ${theme.dim(".thinking.json")}\n`);
+        console.log(
+          `\n  ${theme.success("✅")} Saved ${renderCapabilityBadge(currentCapLevel)} as default to ${theme.dim(".thinking.json")}\n`,
+        );
       } catch (e) {
         console.log(renderError(`Failed to save config: ${e}`));
       }
@@ -278,7 +307,13 @@ async function startREPL(
           options: opts.options,
           capabilityLevel: currentCapLevel,
           onConfirm: async (toolCall, assessment) => {
-            console.log(renderConfirmation(toolCall, { level: assessment.level as string, reason: assessment.reason, risks: assessment.risks }));
+            console.log(
+              renderConfirmation(toolCall, {
+                level: assessment.level as string,
+                reason: assessment.reason,
+                risks: assessment.risks,
+              }),
+            );
             const answer = await askUserVia(rl, renderPrompt(currentCapLevel));
             return answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
           },
@@ -305,9 +340,13 @@ async function startREPL(
         console.log(theme.muted("  " + "─".repeat(50)));
         audit.slice(-10).forEach((entry, i) => {
           const level = entry.riskLevel as string;
-          console.log(`  ${theme.dim(`#${i + 1}`)} ${theme.bold(entry.toolCall.name)} → ${renderRiskLevel(level)} ${theme.dim(`[${entry.result || "pending"}]`)}`);
+          console.log(
+            `  ${theme.dim(`#${i + 1}`)} ${theme.bold(entry.toolCall.name)} → ${renderRiskLevel(level)} ${theme.dim(`[${entry.result || "pending"}]`)}`,
+          );
           if (entry.risks.length > 0) {
-            entry.risks.forEach(r => console.log(`     ${theme.warning("⚠")} ${r}`));
+            entry.risks.forEach((r) => {
+              console.log(`     ${theme.warning("⚠")} ${r}`);
+            });
           }
         });
       }
@@ -369,7 +408,6 @@ async function startREPL(
   });
 }
 
-
 program
   .command("plan")
   .description("Execute a complex task with planning (decompose → execute → replan)")
@@ -392,7 +430,7 @@ program
     console.log(`\n  ${gradients.primary("◈ Planning task...")}\n`);
 
     const registry = new ToolRegistry();
-    [...fileTools, ...searchTools, ...shellTools, ...gitTools].forEach(tool => {
+    [...fileTools, ...searchTools, ...shellTools, ...gitTools].forEach((tool) => {
       registry.register(tool);
     });
 
@@ -421,17 +459,30 @@ function printPlanResult(result: PlanExecutionResult) {
   console.log(gradients.aurora("  ◈ Plan Execution Result"));
   console.log(theme.muted("  " + "─".repeat(50)));
   console.log(`  ${theme.primary("◆")} Goal    : ${theme.bold(result.plan.goal)}`);
-  console.log(`  ${theme.primary("◆")} Status  : ${result.finalStatus === "completed" ? theme.success(result.finalStatus) : theme.error(result.finalStatus)}`);
-  console.log(`  ${theme.primary("◆")} Steps   : ${theme.bold(`${result.completedSteps}/${result.totalSteps}`)} completed`);
+  console.log(
+    `  ${theme.primary("◆")} Status  : ${result.finalStatus === "completed" ? theme.success(result.finalStatus) : theme.error(result.finalStatus)}`,
+  );
+  console.log(
+    `  ${theme.primary("◆")} Steps   : ${theme.bold(`${result.completedSteps}/${result.totalSteps}`)} completed`,
+  );
   console.log(`  ${theme.primary("◆")} Duration: ${theme.bold((result.durationMs / 1000).toFixed(1))}s`);
   console.log(`  ${theme.primary("◆")} Version : ${theme.dim(`v${result.plan.version}`)}`);
   console.log("");
   console.log(`  ${theme.bold("Steps:")}`);
   for (const step of result.plan.steps) {
-    const icon = step.status === "completed" ? theme.success("✅") : step.status === "failed" ? theme.error("❌") : step.status === "skipped" ? theme.warning("⏭️") : theme.muted("⬜");
+    const icon =
+      step.status === "completed"
+        ? theme.success("✅")
+        : step.status === "failed"
+          ? theme.error("❌")
+          : step.status === "skipped"
+            ? theme.warning("⏭️")
+            : theme.muted("⬜");
     console.log(`    ${icon} ${theme.bold(`Step ${step.id}`)}: ${step.description}`);
     if (step.result) {
-      console.log(`       ${theme.dim("→")} ${theme.dim(step.result.slice(0, 100))}${step.result.length > 100 ? theme.dim("...") : ""}`);
+      console.log(
+        `       ${theme.dim("→")} ${theme.dim(step.result.slice(0, 100))}${step.result.length > 100 ? theme.dim("...") : ""}`,
+      );
     }
   }
   console.log(theme.muted("  " + "─".repeat(50)));

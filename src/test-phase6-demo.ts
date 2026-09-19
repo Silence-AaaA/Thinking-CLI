@@ -6,16 +6,16 @@
  * 每一层都有明确的"成功标志"，你可以直接看到输出判断是否生效
  */
 
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { ExecutionStatus, StateMachine } from "./core/state-machine.js";
+import { AgentNotebookManager } from "./memory/agent-notebook.js";
+import { ExtractionScheduler } from "./memory/extraction-scheduler.js";
 import { InstructionLayer } from "./memory/instruction-layer.js";
 import { KnowledgeStore } from "./memory/knowledge-layer.js";
-import { AgentNotebookManager } from "./memory/agent-notebook.js";
-import { RetrievalEngine, MetadataFilter, ImportanceFilter, RelevanceRanker } from "./memory/retrieval-engine.js";
 import { PromptBuilder } from "./memory/prompt-builder.js";
-import { ExtractionScheduler } from "./memory/extraction-scheduler.js";
-import { StateMachine, ExecutionStatus } from "./core/state-machine.js";
-import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
+import { ImportanceFilter, MetadataFilter, RelevanceRanker, RetrievalEngine } from "./memory/retrieval-engine.js";
 
 const SEP = "═".repeat(70);
 const SUBSEP = "─".repeat(50);
@@ -185,10 +185,10 @@ notebook.updatePlan({
   id: "plan-1",
   goal: "实现用户认证模块",
   steps: [
-    { id: 1, description: "分析现有代码结构", dependencies: [], status: "pending" , retryCount: 0},
-    { id: 2, description: "设计 JWT 方案", dependencies: [1], status: "pending" , retryCount: 0},
-    { id: 3, description: "实现认证中间件", dependencies: [2], status: "pending" , retryCount: 0},
-    { id: 4, description: "编写测试", dependencies: [3], status: "pending" , retryCount: 0},
+    { id: 1, description: "分析现有代码结构", dependencies: [], status: "pending", retryCount: 0 },
+    { id: 2, description: "设计 JWT 方案", dependencies: [1], status: "pending", retryCount: 0 },
+    { id: 3, description: "实现认证中间件", dependencies: [2], status: "pending", retryCount: 0 },
+    { id: 4, description: "编写测试", dependencies: [3], status: "pending", retryCount: 0 },
   ],
   createdAt: Date.now(),
 });
@@ -211,11 +211,10 @@ notebook.completeStep(1, "success", "发现需要新建 auth 模块");
 console.log("   ④ completeStep(1, 'success', '发现需要新建 auth 模块')");
 
 // Step 4: 记录决策
-notebook.addDecision(
-  "使用 JWT 而非 session cookies",
-  "前端是 SPA，无状态认证更合适；JWT 可以跨服务共享",
-  ["Session Cookies", "OAuth2"]
-);
+notebook.addDecision("使用 JWT 而非 session cookies", "前端是 SPA，无状态认证更合适；JWT 可以跨服务共享", [
+  "Session Cookies",
+  "OAuth2",
+]);
 console.log("   ⑤ addDecision('使用 JWT', '前端是 SPA...')");
 
 // Step 5: 执行第二步
@@ -228,11 +227,10 @@ console.log("   ⑦ setBlocked('找不到密钥管理方案')");
 
 // Step 7: 解除阻塞，继续
 notebook.beginStep(2, "设计 JWT 认证方案（已解决密钥问题）");
-notebook.addDecision(
-  "使用环境变量管理 JWT 密钥",
-  "项目规模小，Vault 过度设计；环境变量 + .env 文件足够",
-  ["HashiCorp Vault", "AWS Secrets Manager"]
-);
+notebook.addDecision("使用环境变量管理 JWT 密钥", "项目规模小，Vault 过度设计；环境变量 + .env 文件足够", [
+  "HashiCorp Vault",
+  "AWS Secrets Manager",
+]);
 notebook.completeStep(2, "success", "JWT 方案设计完成");
 console.log("   ⑧ 解除阻塞，完成 step 2");
 
@@ -252,7 +250,9 @@ console.log(`   Notebook 版本: ${notebook.getData().version}`);
 console.log(`   决策数量: ${notebook.getData().decisions.length}`);
 console.log(`   观察数量: ${notebook.getData().observations.length}`);
 console.log(`   工作日志: ${notebook.getData().worklog.length} 条`);
-console.log(`   Snapshot 共享后目标一致: ${notebook2.getData().goal.primary === "实现用户认证模块" ? "✅ YES" : "❌ NO"}`);
+console.log(
+  `   Snapshot 共享后目标一致: ${notebook2.getData().goal.primary === "实现用户认证模块" ? "✅ YES" : "❌ NO"}`,
+);
 console.log(`   Snapshot 共享后决策一致: ${notebook2.getData().decisions.length === 2 ? "✅ YES" : "❌ NO"}`);
 
 // ============================================================
@@ -351,7 +351,9 @@ const researchHasCite = researchResult.messages[0].content.includes("Cite source
 console.log(`\n✅ 验证：`);
 console.log(`   Coding prompt 包含 git_diff 指令: ${codingHasGitDiff ? "✅ YES" : "❌ NO"}`);
 console.log(`   Research prompt 包含 Cite sources: ${researchHasCite ? "✅ YES" : "❌ NO"}`);
-console.log(`   Notebook 注入: ${codingResult.report.sections.find(s => s.name === "notebook")?.messageCount ?? 0 > 0 ? "✅ YES" : "❌ NO"}`);
+console.log(
+  `   Notebook 注入: ${(codingResult.report.sections.find((s) => s.name === "notebook")?.messageCount ?? 0) > 0 ? "✅ YES" : "❌ NO"}`,
+);
 console.log(`   Knowledge 注入: ${codingResult.report.retrievalCount > 0 ? "✅ YES" : "❌ NO"}`);
 console.log(`   总消息数: ${codingResult.report.totalMessages}`);
 console.log(`   估算 token: ${codingResult.report.estimatedTotalTokens}`);

@@ -43,7 +43,8 @@ export const CAPABILITY_PROFILES: Record<CapabilityLevel, CapabilityProfile> = {
     maxIterations: 8,
     preferPlanned: false,
     temperature: 0.2,
-    systemPromptSuffix: "\n\n## Mode: Quick\n- Be concise. Short answers.\n- Skip unnecessary exploration.\n- Answer directly if you know the answer.",
+    systemPromptSuffix:
+      "\n\n## Mode: Quick\n- Be concise. Short answers.\n- Skip unnecessary exploration.\n- Answer directly if you know the answer.",
     color: "#60efff",
     icon: "🟢",
   },
@@ -65,7 +66,8 @@ export const CAPABILITY_PROFILES: Record<CapabilityLevel, CapabilityProfile> = {
     maxIterations: 40,
     preferPlanned: true,
     temperature: 0.7,
-    systemPromptSuffix: "\n\n## Mode: Deep Reasoning\n- Think step-by-step before acting.\n- Consider edge cases and alternatives.\n- Use planning mode for multi-file changes.\n- Verify every change thoroughly.",
+    systemPromptSuffix:
+      "\n\n## Mode: Deep Reasoning\n- Think step-by-step before acting.\n- Consider edge cases and alternatives.\n- Use planning mode for multi-file changes.\n- Verify every change thoroughly.",
     color: "#a855f7",
     icon: "🟣",
   },
@@ -76,7 +78,8 @@ export const CAPABILITY_PROFILES: Record<CapabilityLevel, CapabilityProfile> = {
     maxIterations: 60,
     preferPlanned: true,
     temperature: 0.9,
-    systemPromptSuffix: "\n\n## Mode: Maximum Power\n- Exhaustive analysis before action.\n- Always verify every change with tests.\n- Use multiple approaches if the first fails.\n- Think about security, performance, and maintainability.\n- Leave no edge case unchecked.",
+    systemPromptSuffix:
+      "\n\n## Mode: Maximum Power\n- Exhaustive analysis before action.\n- Always verify every change with tests.\n- Use multiple approaches if the first fails.\n- Think about security, performance, and maintainability.\n- Leave no edge case unchecked.",
     color: "#ff00e5",
     icon: "🔴",
   },

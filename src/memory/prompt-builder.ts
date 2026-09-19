@@ -20,17 +20,17 @@
  * ============================================================
  */
 
-import type { Message } from "../llm/types.js";
-import type { StateMachine } from "../core/state-machine.js";
-import type { InstructionContext } from "./instruction-layer.js";
-import type { AgentNotebookData } from "./agent-notebook.js";
-import type { RetrievalResult } from "./retrieval-engine.js";
-import type { HistoryCheckpoint } from "../core/history-checkpoints.js";
 import type { ContextChangeEntry } from "../core/context-changelog.js";
-import { HistoryCompressor } from "../core/history-compressor.js";
-import { HistoryCheckpointManager } from "../core/history-checkpoints.js";
 import { ContextChangelog } from "../core/context-changelog.js";
+import type { HistoryCheckpoint } from "../core/history-checkpoints.js";
+import { HistoryCheckpointManager } from "../core/history-checkpoints.js";
+import { HistoryCompressor } from "../core/history-compressor.js";
+import type { StateMachine } from "../core/state-machine.js";
+import type { Message } from "../llm/types.js";
 import { getLogger } from "../utils/logger.js";
+import type { AgentNotebookData } from "./agent-notebook.js";
+import type { InstructionContext } from "./instruction-layer.js";
+import type { RetrievalResult } from "./retrieval-engine.js";
 
 // ============================================================
 // 类型定义
@@ -138,11 +138,9 @@ export class PromptBuilder {
       minRoundsToCompress: this.config.minRoundsToCompress,
     });
     this.checkpoints = new HistoryCheckpointManager(
-      this.config.maxHistoryCheckpoints ?? DEFAULT_CONFIG.maxHistoryCheckpoints!
+      this.config.maxHistoryCheckpoints ?? DEFAULT_CONFIG.maxHistoryCheckpoints!,
     );
-    this.changelog = new ContextChangelog(
-      this.config.maxContextChangelog ?? DEFAULT_CONFIG.maxContextChangelog!
-    );
+    this.changelog = new ContextChangelog(this.config.maxContextChangelog ?? DEFAULT_CONFIG.maxContextChangelog!);
   }
 
   get currentContextVersion(): number {
@@ -236,7 +234,7 @@ export class PromptBuilder {
     });
 
     // === 5. History (压缩 + 最近) ===
-    const nonSystemMsgs = components.rawMessages.filter(m => m.role !== "system");
+    const nonSystemMsgs = components.rawMessages.filter((m) => m.role !== "system");
 
     if (this.compressor.shouldCompress(nonSystemMsgs)) {
       const compressed = this.compressor.compress(nonSystemMsgs);
@@ -282,10 +280,14 @@ export class PromptBuilder {
     }
 
     // === 7. Changelog ===
-    if (injectedNotebook !== this.lastInjectedNotebook) changedBecause.push(`notebook:${this.lastInjectedNotebook}->${injectedNotebook}`);
-    if (injectedKnowledge !== this.lastInjectedKnowledge) changedBecause.push(`knowledge:${this.lastInjectedKnowledge}->${injectedKnowledge}`);
-    if (compressedCount !== this.lastCompressedMessages) changedBecause.push(`compressed:${this.lastCompressedMessages}->${compressedCount}`);
-    if (droppedForBudget !== this.lastDroppedForBudget) changedBecause.push(`dropped:${this.lastDroppedForBudget}->${droppedForBudget}`);
+    if (injectedNotebook !== this.lastInjectedNotebook)
+      changedBecause.push(`notebook:${this.lastInjectedNotebook}->${injectedNotebook}`);
+    if (injectedKnowledge !== this.lastInjectedKnowledge)
+      changedBecause.push(`knowledge:${this.lastInjectedKnowledge}->${injectedKnowledge}`);
+    if (compressedCount !== this.lastCompressedMessages)
+      changedBecause.push(`compressed:${this.lastCompressedMessages}->${compressedCount}`);
+    if (droppedForBudget !== this.lastDroppedForBudget)
+      changedBecause.push(`dropped:${this.lastDroppedForBudget}->${droppedForBudget}`);
     if (changedBecause.length === 0 && this.contextVersion === 0) changedBecause.push("initial_build");
     else if (changedBecause.length === 0) changedBecause.push("no_major_change");
 
@@ -357,15 +359,18 @@ export class PromptBuilder {
     const lines: string[] = ["## Agent Runtime State"];
 
     const statusIcon = {
-      active: "🟢", completed: "✅", failed: "❌", blocked: "🚫",
+      active: "🟢",
+      completed: "✅",
+      failed: "❌",
+      blocked: "🚫",
     }[notebook.goal.status];
     lines.push(`**Goal**: ${notebook.goal.primary} ${statusIcon}`);
 
     if (notebook.plan) {
       lines.push(
         `**Plan**: ${notebook.plan.steps.length} steps | ` +
-        `${notebook.plan.completedCount} completed | ${notebook.plan.failedCount} failed | ` +
-        `current: step ${notebook.plan.currentStepIndex + 1}`
+          `${notebook.plan.completedCount} completed | ${notebook.plan.failedCount} failed | ` +
+          `current: step ${notebook.plan.currentStepIndex + 1}`,
       );
     }
 
@@ -415,7 +420,9 @@ export class PromptBuilder {
   private formatStateSnapshot(snapshot: ReturnType<StateMachine["snapshot"]>): string {
     const lines: string[] = ["## Execution State"];
     lines.push(`Status: ${snapshot.status}`);
-    lines.push(`Steps: ${snapshot.totalSteps} (completed: ${snapshot.completedSteps.length}, failed: ${snapshot.failedSteps.length})`);
+    lines.push(
+      `Steps: ${snapshot.totalSteps} (completed: ${snapshot.completedSteps.length}, failed: ${snapshot.failedSteps.length})`,
+    );
     if (snapshot.retryCount > 0) lines.push(`Retries: ${snapshot.retryCount}`);
     if (snapshot.reflections.length > 0) {
       lines.push(`Reflections: ${snapshot.reflections.length}`);

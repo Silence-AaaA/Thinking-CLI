@@ -20,10 +20,10 @@
  * ============================================================
  */
 
+import { getLogger } from "../utils/logger.js";
 import type { Agent } from "./agent.js";
 import type { TaskPlan, TaskStep } from "./task-planner.js";
 import type { WorkingMemory } from "./working-memory.js";
-import { getLogger } from "../utils/logger.js";
 
 /** 步骤执行结果 */
 export interface StepExecutionResult {
@@ -69,17 +69,13 @@ export class StepExecutor {
   /**
    * 执行整个计划（每步前重置执行状态）
    */
-  async executeWithReset(
-    plan: TaskPlan,
-    agent: Agent,
-    memory: WorkingMemory
-  ): Promise<PlanExecutionResult> {
+  async executeWithReset(plan: TaskPlan, agent: Agent, memory: WorkingMemory): Promise<PlanExecutionResult> {
     const startTime = Date.now();
     const stepResults: StepExecutionResult[] = [];
 
     this.logger.info(
       "StepExecutor",
-      `Executing plan: ${plan.steps.length} steps, maxIterations/step=${this.config.maxIterationsPerStep}`
+      `Executing plan: ${plan.steps.length} steps, maxIterations/step=${this.config.maxIterationsPerStep}`,
     );
 
     while (true) {
@@ -108,23 +104,14 @@ export class StepExecutor {
       }
     }
 
-    const completedSteps = plan.steps.filter(
-      (s) => s.status === "completed"
-    ).length;
-    const failedSteps = plan.steps.filter(
-      (s) => s.status === "failed"
-    ).length;
+    const completedSteps = plan.steps.filter((s) => s.status === "completed").length;
+    const failedSteps = plan.steps.filter((s) => s.status === "failed").length;
 
-    const finalStatus =
-      failedSteps === 0
-        ? "completed"
-        : completedSteps === 0
-        ? "failed"
-        : "partial";
+    const finalStatus = failedSteps === 0 ? "completed" : completedSteps === 0 ? "failed" : "partial";
 
     this.logger.info(
       "StepExecutor",
-      `Plan finished: ${completedSteps}/${plan.steps.length} completed, ${failedSteps} failed, status=${finalStatus}`
+      `Plan finished: ${completedSteps}/${plan.steps.length} completed, ${failedSteps} failed, status=${finalStatus}`,
     );
 
     return {
@@ -140,18 +127,11 @@ export class StepExecutor {
   /**
    * 执行单个步骤
    */
-  private async executeStep(
-    step: TaskStep,
-    plan: TaskPlan,
-    agent: Agent
-  ): Promise<StepExecutionResult> {
+  private async executeStep(step: TaskStep, plan: TaskPlan, agent: Agent): Promise<StepExecutionResult> {
     const startTime = Date.now();
     step.status = "executing";
 
-    this.logger.info(
-      "StepExecutor",
-      `Step ${step.id}/${plan.steps.length}: ${step.description.slice(0, 60)}`
-    );
+    this.logger.info("StepExecutor", `Step ${step.id}/${plan.steps.length}: ${step.description.slice(0, 60)}`);
 
     // 构造步骤级别的 goal
     const stepGoal = this.buildStepGoal(step, plan);
@@ -159,10 +139,7 @@ export class StepExecutor {
     try {
       const result = await agent.run(stepGoal);
 
-      this.logger.info(
-        "StepExecutor",
-        `Step ${step.id} completed: ${result.slice(0, 60)}`
-      );
+      this.logger.info("StepExecutor", `Step ${step.id} completed: ${result.slice(0, 60)}`);
 
       return {
         stepId: step.id,
@@ -173,10 +150,7 @@ export class StepExecutor {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
 
-      this.logger.warn(
-        "StepExecutor",
-        `Step ${step.id} failed: ${errorMsg}`
-      );
+      this.logger.warn("StepExecutor", `Step ${step.id} failed: ${errorMsg}`);
 
       return {
         stepId: step.id,
@@ -201,9 +175,7 @@ export class StepExecutor {
     lines.push("");
 
     // 前序已完成步骤的结果
-    const completedSteps = plan.steps.filter(
-      (s) => s.status === "completed" && s.id < step.id
-    );
+    const completedSteps = plan.steps.filter((s) => s.status === "completed" && s.id < step.id);
     if (completedSteps.length > 0) {
       lines.push(`## Completed Steps`);
       for (const s of completedSteps) {
@@ -253,10 +225,7 @@ export class StepExecutor {
     for (const step of plan.steps) {
       if (toSkip.has(step.id)) {
         step.status = "skipped";
-        this.logger.info(
-          "StepExecutor",
-          `Step ${step.id} skipped (depends on failed step ${failedStepId})`
-        );
+        this.logger.info("StepExecutor", `Step ${step.id} skipped (depends on failed step ${failedStepId})`);
       }
     }
   }

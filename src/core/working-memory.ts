@@ -33,14 +33,7 @@ const DEFAULT_CONFIG: Required<WorkingMemoryConfig> = {
   maxStrength: 20,
 };
 
-export type MemorySourceKind =
-  | "user"
-  | "tool"
-  | "observation"
-  | "reflection"
-  | "replan"
-  | "system"
-  | "unknown";
+export type MemorySourceKind = "user" | "tool" | "observation" | "reflection" | "replan" | "system" | "unknown";
 
 export interface MemorySource {
   kind: MemorySourceKind;
@@ -110,10 +103,7 @@ export class WorkingMemory {
 
     let changed = false;
     for (const finding of this._findings) {
-      const newStrength = Math.max(
-        this.config.minStrength,
-        finding.strength - this.config.decayPerStep,
-      );
+      const newStrength = Math.max(this.config.minStrength, finding.strength - this.config.decayPerStep);
       if (newStrength !== finding.strength) {
         finding.strength = newStrength;
         changed = true;
@@ -121,9 +111,7 @@ export class WorkingMemory {
     }
 
     const before = this._findings.length;
-    this._findings = this._findings.filter(
-      (f) => f.strength > this.config.minStrength || f.importance === "high",
-    );
+    this._findings = this._findings.filter((f) => f.strength > this.config.minStrength || f.importance === "high");
     if (this._findings.length !== before) {
       changed = true;
     }
@@ -224,9 +212,7 @@ export class WorkingMemory {
     } else {
       this._activeFiles.set(path, { addedAtStep: this._currentStep, lastSeenStep: this._currentStep });
       if (this._activeFiles.size > this.config.maxTrackedFiles) {
-        const oldest = [...this._activeFiles.entries()].sort(
-          (a, b) => a[1].lastSeenStep - b[1].lastSeenStep,
-        )[0];
+        const oldest = [...this._activeFiles.entries()].sort((a, b) => a[1].lastSeenStep - b[1].lastSeenStep)[0];
         if (oldest) this._activeFiles.delete(oldest[0]);
       }
     }
@@ -265,7 +251,9 @@ export class WorkingMemory {
       source: { ...f.source },
       tags: f.tags ? [...f.tags] : undefined,
     }));
-    this._activeFiles = new Map(snap.activeFiles.map((p) => [p, { addedAtStep: snap.currentStep, lastSeenStep: snap.currentStep }]));
+    this._activeFiles = new Map(
+      snap.activeFiles.map((p) => [p, { addedAtStep: snap.currentStep, lastSeenStep: snap.currentStep }]),
+    );
     this._recentErrors = [...snap.recentErrors];
     this._decisions = [...snap.decisions];
     this._version = snap.version;
@@ -299,12 +287,16 @@ export class WorkingMemory {
 
     if (this._decisions.length > 0) {
       lines.push("**Previous Decisions**:");
-      this._decisions.forEach((d) => lines.push(`  - ${d}`));
+      this._decisions.forEach((d) => {
+        lines.push(`  - ${d}`);
+      });
     }
 
     if (this._recentErrors.length > 0) {
       lines.push("**Known Issues**:");
-      this._recentErrors.forEach((e) => lines.push(`  - ${e}`));
+      this._recentErrors.forEach((e) => {
+        lines.push(`  - ${e}`);
+      });
     }
 
     return lines.join("\n");
@@ -335,12 +327,16 @@ export class WorkingMemory {
 
     if (this._recentErrors.length > 0) {
       lines.push("**Recent Errors**:");
-      this._recentErrors.forEach((e) => lines.push(`  - ${e}`));
+      this._recentErrors.forEach((e) => {
+        lines.push(`  - ${e}`);
+      });
     }
 
     if (this._decisions.length > 0) {
       lines.push("**Decisions**:");
-      this._decisions.forEach((d) => lines.push(`  - ${d}`));
+      this._decisions.forEach((d) => {
+        lines.push(`  - ${d}`);
+      });
     }
 
     return lines.join("\n");
@@ -402,5 +398,3 @@ function clamp(value: number, min: number, max: number): number {
 function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
-
-

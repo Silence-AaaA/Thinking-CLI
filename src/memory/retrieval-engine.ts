@@ -14,14 +14,8 @@
  * ============================================================
  */
 
-import type {
-  KnowledgeEntry,
-  KnowledgeType,
-  KnowledgeScope,
-  KnowledgeStore,
-  IndexEntry,
-} from "./knowledge-layer.js";
 import { getLogger } from "../utils/logger.js";
+import type { IndexEntry, KnowledgeEntry, KnowledgeScope, KnowledgeStore, KnowledgeType } from "./knowledge-layer.js";
 
 // ============================================================
 // 类型定义
@@ -88,19 +82,17 @@ export class MetadataFilter implements RetrievalFilter {
 
     // 按 type 过滤
     if (query.types && query.types.length > 0) {
-      result = result.filter(e => query.types!.includes(e.type));
+      result = result.filter((e) => query.types!.includes(e.type));
     }
 
     // 按 scope 过滤
     if (query.scope) {
-      result = result.filter(e => e.scope === query.scope);
+      result = result.filter((e) => e.scope === query.scope);
     }
 
     // 按 tags 过滤（OR 语义：任一 tag 匹配即可）
     if (query.tags && query.tags.length > 0) {
-      result = result.filter(e =>
-        query.tags!.some(tag => e.tags.includes(tag))
-      );
+      result = result.filter((e) => query.tags!.some((tag) => e.tags.includes(tag)));
     }
 
     return result;
@@ -119,7 +111,7 @@ export class ImportanceFilter implements RetrievalFilter {
   }
 
   filter(candidates: KnowledgeEntry[], _query: RetrievalQuery): KnowledgeEntry[] {
-    return candidates.filter(e => e.importance >= this.minImportance);
+    return candidates.filter((e) => e.importance >= this.minImportance);
   }
 }
 
@@ -137,7 +129,7 @@ export class RecencyFilter implements RetrievalFilter {
 
   filter(candidates: KnowledgeEntry[], _query: RetrievalQuery): KnowledgeEntry[] {
     const cutoff = Date.now() - this.maxAge;
-    return candidates.filter(e => e.updatedAt >= cutoff);
+    return candidates.filter((e) => e.updatedAt >= cutoff);
   }
 }
 
@@ -162,7 +154,7 @@ export class RelevanceRanker implements RetrievalRanker {
   rank(candidates: KnowledgeEntry[], _query: RetrievalQuery): ScoredEntry[] {
     const now = Date.now();
 
-    return candidates.map(entry => {
+    return candidates.map((entry) => {
       const importanceWeight = entry.importance / 5;
       const daysSinceUpdate = (now - entry.updatedAt) / (24 * 60 * 60 * 1000);
       const recencyFactor = 1 / (1 + daysSinceUpdate * 0.1);
@@ -186,10 +178,7 @@ export interface RetrievalEngineConfig {
 }
 
 const DEFAULT_CONFIG: RetrievalEngineConfig = {
-  filters: [
-    new MetadataFilter(),
-    new ImportanceFilter(2),
-  ],
+  filters: [new MetadataFilter(), new ImportanceFilter(2)],
   ranker: new RelevanceRanker(),
   defaultLimit: 10,
 };
@@ -237,15 +226,15 @@ export class RetrievalEngine {
       scores.set(s.entry.id, s.score);
     }
 
-    this.logger.info(
-      "Retrieval",
-      `Retrieved ${top.length}/${totalCandidates} entries (filtered: ${filteredCount})`
-    );
+    this.logger.info("Retrieval", `Retrieved ${top.length}/${totalCandidates} entries (filtered: ${filteredCount})`);
 
     return {
-      entries: top.map(s => s.entry),
+      entries: top.map((s) => s.entry),
       scores,
-      strategy: this.filters.map(f => f.name).concat(this.ranker.name).join("→"),
+      strategy: this.filters
+        .map((f) => f.name)
+        .concat(this.ranker.name)
+        .join("→"),
       totalCandidates,
       filteredCount,
     };
