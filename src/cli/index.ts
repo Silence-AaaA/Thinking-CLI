@@ -57,7 +57,7 @@ const program = new Command();
 program
   .name("thinking-agent")
   .description("A CLI coding agent with ReAct loop, planning, memory and safety controls")
-  .version("0.4.6");
+  .version("0.5.0");
 
 program
   .argument("[task]", "Task to execute (omit for REPL mode)")
