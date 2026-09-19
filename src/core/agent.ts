@@ -36,7 +36,7 @@ import { RuntimeMetrics } from "./runtime-metrics.js";
 import { ExecutionStatus, StateMachine } from "./state-machine.js";
 import { type PlanExecutionResult, StepExecutor } from "./step-executor.js";
 import { TaskPlanner } from "./task-planner.js";
-import type { TaskRouter } from "./task-router.js";
+import { TaskRouter } from "./task-router.js";
 import { WorkingMemory } from "./working-memory.js";
 
 export interface AgentConfig {
@@ -687,6 +687,19 @@ export class Agent {
     );
 
     return result;
+  }
+
+  /** 自动路由：由 TaskRouter 决定 DIRECT(单次执行)还是 PLAN(规划执行) */
+  async runAuto(goal: string): Promise<string | PlanExecutionResult> {
+    if (!this.taskRouter) {
+      this.taskRouter = new TaskRouter(this.llm);
+    }
+    const mode = await this.taskRouter.route(goal, this.workingMemory);
+    this.logger.info("Agent", `Router decision: ${mode}`);
+    if (mode === "direct") {
+      return this.run(goal);
+    }
+    return this.runPlanned(goal);
   }
 
   getTaskPlanner(): TaskPlanner | undefined {

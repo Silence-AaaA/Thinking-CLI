@@ -175,12 +175,16 @@ async function executeTask(
   });
 
   try {
-    const result = await agent.run(task);
-    console.log(renderResult());
-    console.log(result);
-    const m = agent.getLastRunMetrics()?.currentSnapshot();
-    if (m) {
-      console.log(renderMetrics(m));
+    const result = await agent.runAuto(task);
+    if (typeof result === "string") {
+      console.log(renderResult());
+      console.log(result);
+      const m = agent.getLastRunMetrics()?.currentSnapshot();
+      if (m) {
+        console.log(renderMetrics(m));
+      }
+    } else {
+      printPlanResult(result);
     }
     console.log();
   } catch (error) {
