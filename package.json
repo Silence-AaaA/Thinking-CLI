@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "thinking-agent",
   "version": "0.4.6",
   "description": "A CLI coding agent built for learning Agent architecture",
@@ -12,14 +12,16 @@
     "dev": "tsx src/cli/index.ts",
     "start": "node dist/cli/index.js",
     "repl": "tsx src/cli/index.ts --repl",
-    "test": "tsx src/test.ts",
+    "test": "npm run test:all && npm run test:unit",
     "test:phase2": "tsx src/test-observation.ts",
     "test:phase3": "tsx src/test-phase3.ts",
     "test:bypass": "tsx src/test-bypass.ts",
     "test:phase3-exec": "tsx src/test-phase3-exec.ts",
     "test:phase4": "tsx src/test-phase4.ts",
     "test:phase6": "tsx src/test-phase6.ts",
-    "test:all": "tsx src/test.ts && tsx src/test-observation.ts && tsx src/test-phase3.ts && tsx src/test-phase3-exec.ts && tsx src/test-phase4.ts && tsx src/test-phase6.ts"
+    "test:all": "tsx src/test.ts && tsx src/test-observation.ts && tsx src/test-phase3.ts && tsx src/test-phase3-exec.ts && tsx src/test-phase4.ts && tsx src/test-phase5.ts && tsx src/test-task-router.ts && tsx src/test-bypass.ts && tsx src/test-phase6.ts",
+    "test:unit": "vitest run",
+    "coverage": "vitest run --coverage"
   },
   "keywords": [
     "agent",
@@ -30,6 +32,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@vitest/coverage-v8": "^5.0.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },
@@ -46,4 +49,3 @@
     "tsx": "^4.23.1"
   }
 }
-
