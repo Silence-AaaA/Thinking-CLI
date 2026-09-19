@@ -38,14 +38,14 @@
 | # | 问题 | 证据 | 影响 |
 |---|------|------|------|
 | 1 | **零真实任务验证** | 无 fixture repo、无评估脚本、无通过标准 | 系统能力未知,简历无硬证据 |
-| 2 | **`npm run test:all` 漏跑 4 个测试** | `test-phase5.ts`、`test-task-router.ts`、`test-phase6-demo.ts`、`test-bypass.ts` 未被任何 script 纳入 | 规划模块的测试没进全量入口,质量门形同虚设 |
-| 3 | **测试体系分裂** | 20+ 个 `tsx` 断言脚本 + 1 个孤立 vitest 文件(`core/__tests__/working-memory.test.ts`,无 script 运行) | 无统一运行器、无 coverage、无法增量扩展 |
-| 4 | **无工程质量门槛** | 无 eslint/prettier/biome/editorconfig;无 pre-commit | 风格无人把关,代码质量不可控 |
-| 5 | **23 处死代码/未使用项** | `npx tsc --noUnusedLocals --noUnusedParameters` 扫描:agent.ts 的 `TaskPlan`/`taskRouter`/`hashPath`;error-taxonomy/reflection/risk-assessor/prompt-builder 的 `logger`;observation/step-executor/git-tools/extraction-scheduler 的未用参数;agent-notebook/retrieval-engine/working-memory.test 的未用类型导入 | 阅读者一眼看到「没收拾过」 |
-| 6 | **任务路由(DIRECT/PLAN)接线存疑** | `agent.ts` 只 import 了 `TaskRouter` 但从不用;主循环直接懒加载 `TaskPlanner` | DIRECT/PLAN 分流可能从未真正生效,是面试追问高危区 |
-| 7 | **Phase 6 整个未提交** | `git status`:`src/memory/`、`test-phase6*.ts`、ADR-022、phase6-report 全部 untracked;核心文件还有未提交修改 | 仓库历史停在 Phase 5,叙事断档;改动无版本保护 |
-| 8 | **类型逃逸** | `cli/index.ts:259` 的 `saveProjectConfig(... as any)`;`agent.ts` 的 `obs: any`、`knowledgeResult` 的 any 字段 | 破坏 strict 价值,隐藏真实缺陷 |
-| 9 | **无用户向文档** | 仓库根目录无 README.md;quickstart 面向开发者自测,不面向面试官叙事 | 作品展示第一眼失分 |
+| 2 | **`npm run test:all` 漏跑 4 个测试** ✅ W1 已完成(phase5 / task-router / bypass 已入 `test:all`;phase6-demo 保留为交互演示——含写盘副作用,不入自动门) | `test-phase5.ts`、`test-task-router.ts`、`test-phase6-demo.ts`、`test-bypass.ts` 未被任何 script 纳入 | 规划模块的测试没进全量入口,质量门形同虚设 |
+| 3 | **测试体系分裂** ✅ W1 已完成(vitest 统一入口 + 覆盖率 + vitest.config) | 20+ 个 `tsx` 断言脚本 + 1 个孤立 vitest 文件(`core/__tests__/working-memory.test.ts`,无 script 运行) | 无统一运行器、无 coverage、无法增量扩展 |
+| 4 | **无工程质量门槛** ✅ W1 已完成(biome + `npm run check`) | 无 eslint/prettier/biome/editorconfig;无 pre-commit | 风格无人把关,代码质量不可控 |
+| 5 | **23 处死代码/未使用项** ✅ W1 已完成(noUnused 归零) | `npx tsc --noUnusedLocals --noUnusedParameters` 扫描:agent.ts 的 `TaskPlan`/`taskRouter`/`hashPath`;error-taxonomy/reflection/risk-assessor/prompt-builder 的 `logger`;observation/step-executor/git-tools/extraction-scheduler 的未用参数;agent-notebook/retrieval-engine/working-memory.test 的未用类型导入 | 阅读者一眼看到「没收拾过」 |
+| 6 | **任务路由(DIRECT/PLAN)接线存疑** ✅ W1 已完成(`runAuto` 接线,CLI 默认走自动路由;真机分流实测→W2) | `agent.ts` 只 import 了 `TaskRouter` 但从不用;主循环直接懒加载 `TaskPlanner` | DIRECT/PLAN 分流可能从未真正生效,是面试追问高危区 |
+| 7 | **Phase 6 整个未提交** ✅ W1 已完成(基线快照提交,仓库历史贯通) | `git status`:`src/memory/`、`test-phase6*.ts`、ADR-022、phase6-report 全部 untracked;核心文件还有未提交修改 | 仓库历史停在 Phase 5,叙事断档;改动无版本保护 |
+| 8 | **类型逃逸** ✅ W1 已完成(`as any` 与 `obs: any` 全清) | `cli/index.ts:259` 的 `saveProjectConfig(... as any)`;`agent.ts` 的 `obs: any`、`knowledgeResult` 的 any 字段 | 破坏 strict 价值,隐藏真实缺陷 |
+| 9 | **无用户向文档** ✅ W1 已完成(根 README + quickstart 更新) | 仓库根目录无 README.md;quickstart 面向开发者自测,不面向面试官叙事 | 作品展示第一眼失分 |
 
 ### 2.3 审计方法
 
