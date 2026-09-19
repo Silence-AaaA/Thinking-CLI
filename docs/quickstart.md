@@ -1,3 +1,5 @@
+> 面向简历 / 展示：先运行 `npm test` 确认环境就绪，再按下方命令集体验；`npx thinking <task>` 会自动路由任务（DIRECT / PLAN）。真实任务基线报告与优化对比见 `docs/reports/`。
+
 # 快速开始
 
 ## 1. 配置环境变量
