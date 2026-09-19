@@ -3,12 +3,7 @@
 /**
  * Thinking-CLI - 入口
  *
- * Phase 3 (审批): --no-approval 模式 / audit / stats
- * Phase 3 (执行): exec 命令查看执行引擎状态
- * Phase 4.6: wm / ctx / metrics / ctxdiff
- *
- * 【v2 修复】审批确认不再创建新的 readline，复用 REPL 的 rl
- * 防止 "y" 被 REPL 捕获当成新的用户任务
+ * 配置优先级：CLI 参数 > .thinking.json > ~/.thinking/config.json > 内置默认
  */
 
 import { Command } from "commander";
@@ -22,6 +17,8 @@ import { shellTools } from "../tools/shell-tool.js";
 import { gitTools } from "../tools/git-tools.js";
 import { OpenAIAdapter } from "../llm/openai-adapter.js";
 import { initLogger, LogLevel } from "../utils/logger.js";
+import { getCapabilityProfile } from "../capabilities.js";
+import { loadConfig, saveProjectConfig, getConfigPaths } from "../config.js";
 import {
   theme,
   gradients,
@@ -34,6 +31,8 @@ import {
   renderMetrics,
   renderError,
   renderRiskLevel,
+  renderCapabilitySwitch,
+  renderCapabilityList, renderCapabilityBadge,
 } from "../utils/ui.js";
 import type { ToolCall } from "../tools/types.js";
 import type { RiskLevel } from "../core/risk-assessor.js";
@@ -51,12 +50,22 @@ program
 program
   .argument("[task]", "Task to execute (omit for REPL mode)")
   .option("--repl", "Start interactive REPL mode")
-  .option("--model <model>", "LLM model to use", process.env.OPENAI_MODEL || "gpt-4o")
-  .option("--max-iterations <n>", "Max ReAct iterations", "20")
+  .option("--model <model>", "LLM model to use (overrides config)")
+  .option("-c, --capability <level>", "Capability level: low | medium | high | max (overrides config)")
+  .option("--max-iterations <n>", "Max ReAct iterations (overrides capability default)")
   .option("--verbose", "Enable verbose logging")
   .option("--log-dir <dir>", "Directory to save logs")
   .option("--no-approval", "Disable approval system (dev mode)")
   .action(async (task: string | undefined, options) => {
+    // ── 加载配置文件 ──
+    const config = loadConfig();
+
+    // 合并优先级：CLI 参数 > 配置文件 > .env > 内置默认
+    const capLevel = options.capability || config.defaultCapability || "medium";
+    const capProfile = getCapabilityProfile(capLevel);
+    const model = options.model || config.model || process.env.OPENAI_MODEL || "gpt-4o";
+    const enableApproval = options.approval !== false && config.approval !== false;
+
     const logLevel = options.verbose ? LogLevel.DEBUG : LogLevel.INFO;
     const logger = initLogger(logLevel, options.logDir);
 
@@ -65,23 +74,26 @@ program
       registry.register(tool);
     });
 
-    const llm = new OpenAIAdapter({ model: options.model });
-    const enableApproval = options.approval !== false;
+    const llm = new OpenAIAdapter({
+      model,
+      temperature: capProfile.temperature,
+    });
+
     const isRepl = options.repl || !task;
 
-    // ── 显示启动 Banner ──
     console.log(generateBanner());
     console.log(renderWelcomeInfo({
-      model: options.model,
+      model,
       tools: registry.listTools().length,
       approval: enableApproval,
       repl: isRepl,
+      capability: capProfile.level,
     }));
 
     if (isRepl) {
-      await startREPL(llm, registry, { enableApproval, logger, options });
+      await startREPL(llm, registry, { enableApproval, logger, options, capabilityLevel: capProfile.level });
     } else {
-      await executeTask(llm, registry, task, { enableApproval, logger, options });
+      await executeTask(llm, registry, task, { enableApproval, logger, options, capabilityLevel: capProfile.level });
     }
   });
 
@@ -91,11 +103,16 @@ function createAgent(
   opts: {
     enableApproval: boolean;
     options: Record<string, unknown>;
+    capabilityLevel: string;
     onConfirm?: (toolCall: ToolCall, assessment: { level: RiskLevel; reason: string; risks: string[] }) => Promise<boolean>;
   }
 ): Agent {
+  const capProfile = getCapabilityProfile(opts.capabilityLevel);
+  const explicitIterations = opts.options["maxIterations"] as string | undefined;
+  const maxIterations = explicitIterations ? parseInt(explicitIterations) : capProfile.maxIterations;
+
   return new Agent(llm, registry, {
-    maxIterations: parseInt((opts.options["maxIterations"] as string) ?? "20"),
+    maxIterations,
     showThinking: (opts.options["verbose"] as boolean) ?? false,
     enableApproval: opts.enableApproval,
     onConfirm: opts.onConfirm,
@@ -116,9 +133,9 @@ async function executeTask(
   llm: OpenAIAdapter,
   registry: ToolRegistry,
   task: string,
-  opts: { enableApproval: boolean; logger: ReturnType<typeof initLogger>; options: Record<string, unknown> }
+  opts: { enableApproval: boolean; logger: ReturnType<typeof initLogger>; options: Record<string, unknown>; capabilityLevel: string }
 ): Promise<void> {
-  opts.logger.info("CLI", `Task: ${task}`);
+  opts.logger.info("CLI", `Task: ${task} [capability=${opts.capabilityLevel}]`);
   console.log(renderThinking());
 
   const onConfirm = async (
@@ -128,7 +145,7 @@ async function executeTask(
     console.log(renderConfirmation(toolCall, { level: assessment.level as string, reason: assessment.reason, risks: assessment.risks }));
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await new Promise<string>((resolve) => {
-      rl.question(renderPrompt(), (a) => {
+      rl.question(renderPrompt(opts.capabilityLevel), (a) => {
         rl.close();
         resolve(a.trim());
       });
@@ -139,6 +156,7 @@ async function executeTask(
   const agent = createAgent(llm, registry, {
     enableApproval: opts.enableApproval,
     options: opts.options,
+    capabilityLevel: opts.capabilityLevel,
     onConfirm,
   });
 
@@ -159,20 +177,23 @@ async function executeTask(
 async function startREPL(
   llm: OpenAIAdapter,
   registry: ToolRegistry,
-  opts: { enableApproval: boolean; logger: ReturnType<typeof initLogger>; options: Record<string, unknown> }
+  opts: { enableApproval: boolean; logger: ReturnType<typeof initLogger>; options: Record<string, unknown>; capabilityLevel: string }
 ): Promise<void> {
+  let currentCapLevel = opts.capabilityLevel;
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: renderPrompt(),
+    prompt: renderPrompt(currentCapLevel),
   });
 
   let agent = createAgent(llm, registry, {
     enableApproval: opts.enableApproval,
     options: opts.options,
+    capabilityLevel: currentCapLevel,
     onConfirm: async (toolCall, assessment) => {
       console.log(renderConfirmation(toolCall, { level: assessment.level as string, reason: assessment.reason, risks: assessment.risks }));
-      const answer = await askUserVia(rl, renderPrompt());
+      const answer = await askUserVia(rl, renderPrompt(currentCapLevel));
       return answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
     },
   });
@@ -192,25 +213,89 @@ async function startREPL(
       return;
     }
 
+    // ── help ──
     if (input === "help") {
-      console.log(`
-  ${gradients.aurora("◈ Commands")}
-  ${theme.muted("  " + "─".repeat(40))}
-  ${theme.primary("◆")} ${theme.bold("help")}         Show this help
-  ${theme.primary("◆")} ${theme.bold("audit")}        View audit log
-  ${theme.primary("◆")} ${theme.bold("stats")}        Risk statistics
-  ${theme.primary("◆")} ${theme.bold("wm")}           Working memory
-  ${theme.primary("◆")} ${theme.bold("ctx")}           Context state
-  ${theme.primary("◆")} ${theme.bold("metrics")}       Runtime metrics
-  ${theme.primary("◆")} ${theme.bold("ctxdiff")}       Context diff
-  ${theme.primary("◆")} ${theme.bold("clear")}         Clear context
-  ${theme.primary("◆")} ${theme.bold("exit")} / ${theme.bold("quit")}   Exit
-  ${theme.muted("  " + "─".repeat(40))}
-`);
+      console.log(`\n  ${gradients.aurora("◈ Commands")}`);
+      console.log(theme.muted("  " + "─".repeat(48)));
+      console.log(`  ${theme.primary("◆")} ${theme.bold("help")}           Show this help`);
+      console.log(`  ${theme.primary("◆")} ${theme.bold("cap [level]")}    View or switch capability`);
+      console.log(`  ${theme.primary("◆")} ${theme.bold("cap save")}       Save current capability as default`);
+      console.log(`  ${theme.primary("◆")} ${theme.bold("config")}         Show config file paths`);
+      console.log(`  ${theme.primary("◆")} ${theme.bold("audit")}          View audit log`);
+      console.log(`  ${theme.primary("◆")} ${theme.bold("stats")}          Risk statistics`);
+      console.log(`  ${theme.primary("◆")} ${theme.bold("plan <task>")}    Run in planning mode`);
+      console.log(`  ${theme.primary("◆")} ${theme.bold("wm")}             Working memory`);
+      console.log(`  ${theme.primary("◆")} ${theme.bold("exit")} / ${theme.bold("quit")}     Exit`);
+      console.log(theme.muted("  " + "─".repeat(48)));
+      console.log();
       rl.prompt();
       return;
     }
 
+    // ── config ──
+    if (input === "config") {
+      const paths = getConfigPaths();
+      console.log(`\n  ${gradients.aurora("◈ Config")}`);
+      console.log(theme.muted("  " + "─".repeat(48)));
+      console.log(`  ${theme.primary("◆")} Current capability: ${renderCapabilityBadge(currentCapLevel)}`);
+      console.log(`  ${theme.primary("◆")} Project config: ${paths.project ? theme.success(paths.project) : theme.muted("not found")}`);
+      console.log(`  ${theme.primary("◆")} User config:    ${theme.dim(paths.user)}`);
+      console.log(theme.muted("  " + "─".repeat(48)));
+      console.log();
+      rl.prompt();
+      return;
+    }
+
+    // ── cap (查看) ──
+    if (input === "cap" || input === "capability") {
+      console.log(renderCapabilityList());
+      rl.prompt();
+      return;
+    }
+
+    // ── cap save ──
+    if (input === "cap save" || input === "capability save") {
+      try {
+        saveProjectConfig({ defaultCapability: currentCapLevel as any });
+        console.log(`\n  ${theme.success("✅")} Saved ${renderCapabilityBadge(currentCapLevel)} as default to ${theme.dim(".thinking.json")}\n`);
+      } catch (e) {
+        console.log(renderError(`Failed to save config: ${e}`));
+      }
+      rl.prompt();
+      return;
+    }
+
+    // ── cap <level> ──
+    if (input.startsWith("cap ") || input.startsWith("capability ")) {
+      const newLevel = input.split(/\s+/)[1]?.toLowerCase() ?? "";
+      if (["low", "medium", "high", "max"].includes(newLevel)) {
+        const oldLevel = currentCapLevel;
+        currentCapLevel = newLevel;
+        const profile = getCapabilityProfile(newLevel);
+
+        agent = createAgent(llm, registry, {
+          enableApproval: opts.enableApproval,
+          options: opts.options,
+          capabilityLevel: currentCapLevel,
+          onConfirm: async (toolCall, assessment) => {
+            console.log(renderConfirmation(toolCall, { level: assessment.level as string, reason: assessment.reason, risks: assessment.risks }));
+            const answer = await askUserVia(rl, renderPrompt(currentCapLevel));
+            return answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
+          },
+        });
+
+        rl.setPrompt(renderPrompt(currentCapLevel));
+        console.log(renderCapabilitySwitch(oldLevel, newLevel, profile.temperature, profile.maxIterations));
+        console.log(theme.dim(`  Tip: type 'cap save' to make this your default\n`));
+      } else {
+        console.log(`\n  ${theme.error("❌")} Unknown level: ${theme.bold(newLevel)}`);
+        console.log(renderCapabilityList());
+      }
+      rl.prompt();
+      return;
+    }
+
+    // ── audit ──
     if (input === "audit") {
       const audit = agent.getGateway().getAuditLog();
       if (audit.length === 0) {
@@ -220,7 +305,6 @@ async function startREPL(
         console.log(theme.muted("  " + "─".repeat(50)));
         audit.slice(-10).forEach((entry, i) => {
           const level = entry.riskLevel as string;
-          const riskColor = level === "DESTRUCTIVE" || level === "BLOCKED" ? theme.red : level === "EXECUTE" ? theme.yellow : theme.green;
           console.log(`  ${theme.dim(`#${i + 1}`)} ${theme.bold(entry.toolCall.name)} → ${renderRiskLevel(level)} ${theme.dim(`[${entry.result || "pending"}]`)}`);
           if (entry.risks.length > 0) {
             entry.risks.forEach(r => console.log(`     ${theme.warning("⚠")} ${r}`));
@@ -232,6 +316,7 @@ async function startREPL(
       return;
     }
 
+    // ── stats ──
     if (input === "stats") {
       const stats = agent.getGateway().getStats();
       console.log(`\n  ${gradients.aurora("◈ Risk Statistics")}`);
@@ -250,8 +335,7 @@ async function startREPL(
       return;
     }
 
-
-    // Handle "plan" command
+    // ── plan ──
     if (input.toLowerCase().startsWith("plan ")) {
       const task = input.slice(5).trim();
       if (task) {
@@ -269,6 +353,7 @@ async function startREPL(
       return;
     }
 
+    // ── normal task ──
     try {
       console.log(renderThinking());
       const result = await agent.run(input);
@@ -289,15 +374,21 @@ program
   .command("plan")
   .description("Execute a complex task with planning (decompose → execute → replan)")
   .argument("<task>", "Complex task to plan and execute")
-  .option("--model <model>", "LLM model to use", process.env.OPENAI_MODEL || "gpt-4o")
+  .option("--model <model>", "LLM model to use")
+  .option("-c, --capability <level>", "Capability level: low | medium | high | max", "high")
   .option("--max-iterations <n>", "Max ReAct iterations per step", "20")
   .option("--verbose", "Enable verbose logging")
   .option("--no-approval", "Disable approval system")
   .action(async (task: string, options) => {
+    const config = loadConfig();
+    const capLevel = options.capability || config.defaultCapability || "high";
+    const capProfile = getCapabilityProfile(capLevel);
+    const model = options.model || config.model || process.env.OPENAI_MODEL || "gpt-4o";
+
     const logLevel = options.verbose ? LogLevel.DEBUG : LogLevel.INFO;
     const logger = initLogger(logLevel);
 
-    logger.info("CLI", `Planned task: ${task}`);
+    logger.info("CLI", `Planned task: ${task} [capability=${capProfile.level}]`);
     console.log(`\n  ${gradients.primary("◈ Planning task...")}\n`);
 
     const registry = new ToolRegistry();
@@ -305,12 +396,16 @@ program
       registry.register(tool);
     });
 
-    const llm = new OpenAIAdapter({ model: options.model });
-    const enableApproval = options.approval !== false;
+    const llm = new OpenAIAdapter({
+      model,
+      temperature: capProfile.temperature,
+    });
+    const enableApproval = options.approval !== false && config.approval !== false;
 
     const agent = createAgent(llm, registry, {
       enableApproval,
       options,
+      capabilityLevel: capProfile.level,
     });
 
     try {
@@ -350,7 +445,3 @@ function printRunMetrics(agent: Agent) {
   if (!m) return;
   console.log(renderMetrics(m));
 }
-
-
-
-

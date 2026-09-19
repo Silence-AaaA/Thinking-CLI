@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "thinking-agent",
   "version": "0.4.6",
   "description": "A CLI coding agent built for learning Agent architecture",
@@ -18,7 +18,8 @@
     "test:bypass": "tsx src/test-bypass.ts",
     "test:phase3-exec": "tsx src/test-phase3-exec.ts",
     "test:phase4": "tsx src/test-phase4.ts",
-    "test:all": "tsx src/test.ts && tsx src/test-observation.ts && tsx src/test-phase3.ts && tsx src/test-phase3-exec.ts && tsx src/test-phase4.ts"
+    "test:phase6": "tsx src/test-phase6.ts",
+    "test:all": "tsx src/test.ts && tsx src/test-observation.ts && tsx src/test-phase3.ts && tsx src/test-phase3-exec.ts && tsx src/test-phase4.ts && tsx src/test-phase6.ts"
   },
   "keywords": [
     "agent",
@@ -45,3 +46,4 @@
     "tsx": "^4.23.1"
   }
 }
+

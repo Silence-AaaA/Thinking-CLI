@@ -20,10 +20,15 @@ import { ReflectionEngine, type ReflectionJSON } from "./reflection.js";
 import { WorkingMemory } from "./working-memory.js";
 import { ContextAssembler } from "./context-assembler.js";
 import { RuntimeMetrics } from "./runtime-metrics.js";
+import { InstructionLayer, KnowledgeStore, AgentNotebookManager, RetrievalEngine, PromptBuilder, ExtractionScheduler } from "../memory/index.js";
 import { TaskRouter } from "./task-router.js";
 import { TaskPlanner, type TaskPlan } from "./task-planner.js";
 import { StepExecutor, type PlanExecutionResult } from "./step-executor.js";
 import { getLogger } from "../utils/logger.js";
+import { homedir } from "os";
+import { join } from "path";
+import { createHash as nodeCreateHash } from "crypto";
+import { type CapabilityProfile, getCapabilityProfile } from "../capabilities.js";
 
 export interface AgentConfig {
   maxIterations?: number;
@@ -147,8 +152,19 @@ export class Agent {
   private lastRunMetrics?: RuntimeMetrics;
   private taskRouter?: TaskRouter;
   private taskPlanner?: TaskPlanner;
+  private currentCapability?: CapabilityProfile;
   private stepExecutor?: StepExecutor;
   private logger = getLogger();
+
+  // === Phase 6: Information Lifecycle ===
+  private instructionLayer!: InstructionLayer;
+  private knowledgeStore!: KnowledgeStore;
+  private notebook!: AgentNotebookManager;
+  private retrievalEngine!: RetrievalEngine;
+  private promptBuilder!: PromptBuilder;
+  private extractionScheduler!: ExtractionScheduler;
+  private currentCwd!: string;
+  private knowledgeResult: { entries: any[]; scores: Map<string, number>; strategy: string; totalCandidates: number; filteredCount: number } = { entries: [], scores: new Map(), strategy: "none", totalCandidates: 0, filteredCount: 0 };
 
   constructor(llm: LLMAdapter, tools: ToolRegistry, config?: AgentConfig) {
     this.llm = llm;
@@ -175,6 +191,18 @@ export class Agent {
     this.workingMemory = new WorkingMemory();
     this.contextAssembler = new ContextAssembler();
 
+    // === Phase 6: Information Lifecycle ===
+    this.currentCwd = process.cwd();
+    this.instructionLayer = new InstructionLayer();
+    this.knowledgeStore = new KnowledgeStore({
+      storageRoot: join(homedir(), ".thinking"),
+      projectId: nodeCreateHash("sha256").update(this.currentCwd).digest("hex").slice(0, 12),
+    });
+    this.notebook = new AgentNotebookManager();
+    this.retrievalEngine = new RetrievalEngine();
+    this.promptBuilder = new PromptBuilder({ agentType: "coding" });
+    this.extractionScheduler = new ExtractionScheduler();
+
     this.state = {
       messages: [
         { role: "system", content: this.config.systemPrompt },
@@ -183,6 +211,12 @@ export class Agent {
       totalTokens: 0,
       toolCallHistory: [],
     };
+  }
+
+  /** 生成项目路径的稳定 hash（用于知识存储隔离） */
+  private hashPath(p: string): string {
+    // using imported createHash
+    return nodeCreateHash("sha256").update(p).digest("hex").slice(0, 12);
   }
 
   private truncateToolOutput(output: string, maxChars: number): string {
@@ -195,6 +229,21 @@ export class Agent {
   }
 
   async run(userMessage: string): Promise<string> {
+    // === Phase 6: 初始化信息生命周期 ===
+    const instructionCtx = await this.instructionLayer.discover(this.currentCwd, this.config.systemPrompt);
+    this.notebook.setGoal(userMessage);
+    try {
+      this.knowledgeResult = await this.retrievalEngine.retrieve({ goal: userMessage, limit: 5 }, this.knowledgeStore);
+      if (this.knowledgeResult.entries.length > 0) {
+        this.logger.info("Knowledge", `Loaded ${this.knowledgeResult.entries.length} relevant entries`);
+      }
+    } catch { /* 首次运行无知识 */ }
+
+    // 重置状态机（避免 completed -> executing 非法转换）
+    this.stateMachine.reset();
+    this.reflectionEngine.reset();
+    this.doomLoopDetector.reset();
+
     this.state.messages.push({ role: "user", content: userMessage });
 
     this.stateMachine.setGoal(userMessage);
@@ -210,12 +259,18 @@ export class Agent {
       this.workingMemory.setCurrentStep(this.state.currentStep);
       this.workingMemory.tickStep(this.state.currentStep);
 
-      const assembled = this.contextAssembler.assemble(
-        this.state.messages,
-        this.workingMemory,
-        this.stateMachine,
-        this.state.currentStep
-      );
+      // === Phase 6: 同步 Notebook 状态 ===
+      this.notebook.syncFromStateMachine(this.stateMachine);
+      this.notebook.beginStep(this.state.currentStep, "llm_turn", undefined);
+
+      // === Phase 6: PromptBuilder 组装最终 prompt ===
+      const assembled = this.promptBuilder.build({
+        instruction: instructionCtx,
+        notebook: this.notebook.snapshot(),
+        knowledge: this.knowledgeResult,
+        state: this.stateMachine,
+        rawMessages: this.state.messages,
+      }, this.state.currentStep);
 
       this.lastRunMetrics.recordContextReport({
         compressedMessages: assembled.report.compressedMessages,
@@ -225,8 +280,8 @@ export class Agent {
       this.lastRunMetrics.setWorkingMemoryVersion(this.workingMemory.version);
       this.lastRunMetrics.setTotalSteps(this.stateMachine.snapshot().totalSteps);
       this.logger.info(
-        "ContextAssembler",
-        `ctx=${assembled.report.contextVersion}, msgs=${assembled.report.totalMessages}, tokens=${assembled.report.estimatedTotalTokens}, compressed=${assembled.report.compressedMessages}, dropped=${assembled.report.droppedForBudget}`
+        "PromptBuilder",
+        `ctx=${assembled.report.contextVersion}, msgs=${assembled.report.totalMessages}, tokens=${assembled.report.estimatedTotalTokens}, compressed=${assembled.report.compressedMessages}, knowledge=${assembled.report.retrievalCount}, agentType=${assembled.report.agentType}`
       );
 
       const response = await this.llm.chat(
@@ -248,6 +303,9 @@ export class Agent {
       if (response.toolCalls.length === 0) {
         this.logger.info("Agent", "Task completed");
         this.stateMachine.transition(ExecutionStatus.COMPLETED);
+        this.notebook.completeStep(this.state.currentStep, "success", "Task completed");
+        this.notebook.finishGoal("completed");
+        this.notebook.syncFromStateMachine(this.stateMachine);
         this.state.messages.push({ role: "assistant", content: response.content });
         this.lastRunMetrics.setFinalStatus("completed");
         this.lastRunMetrics.finish("completed");
@@ -325,6 +383,20 @@ export class Agent {
             this.workingMemory.addActiveFile(filePath);
             this.workingMemory.reinforceByFile(filePath, 1);
           }
+
+          // Phase 6: Notebook 记录观察 + 知识提取
+          const obs = this.observer.observe(toolCall, result);
+          this.notebook.addObservation({
+            stepId: this.state.currentStep,
+            summary: obs.summary,
+            success: true,
+            severity: obs.severity,
+            keyFindings: obs.keyFindings,
+          });
+          this.extractionScheduler.recordToolCall();
+          if (this.extractionScheduler.shouldExtract(this.state.totalTokens, true)) {
+            await this.extractKnowledge(obs);
+          }
         } else {
           const classification = this.errorTaxonomy.classify(toolCall, result);
           const recovery = this.errorTaxonomy.getRecoveryPlan(classification, 0);
@@ -358,10 +430,22 @@ export class Agent {
             recovery: recovery.action,
           });
 
+          // Phase 6: Notebook 记录失败观察
+          const failObs = this.observer.observe(toolCall, result);
+          this.notebook.addObservation({
+            stepId: this.state.currentStep,
+            summary: failObs.summary,
+            success: false,
+            severity: failObs.severity,
+            keyFindings: failObs.keyFindings,
+          });
+          this.extractionScheduler.recordToolCall();
+
           if (reflection.shouldReflect && reflection.promptForLLM) {
             this.lastRunMetrics.recordReflection();
             this.logger.warn("Agent", `Reflection triggered: ${reflection.trigger}`);
             this.stateMachine.transition(ExecutionStatus.REFLECTING);
+            this.notebook.recordReflection(reflection);
             this.stateMachine.addReflection({
               stepId: this.state.currentStep,
               trigger: reflection.trigger!,
@@ -412,12 +496,13 @@ export class Agent {
     });
 
     try {
-      const finalAssembled = this.contextAssembler.assemble(
-        this.state.messages,
-        this.workingMemory,
-        this.stateMachine,
-        this.state.currentStep
-      );
+      const finalAssembled = this.promptBuilder.build({
+        instruction: instructionCtx,
+        notebook: this.notebook.snapshot(),
+        knowledge: this.knowledgeResult,
+        state: this.stateMachine,
+        rawMessages: this.state.messages,
+      }, this.state.currentStep);
       const finalResponse = await this.llm.chat(finalAssembled.messages, []);
       return finalResponse.content || `Reached maximum iterations (${this.config.maxIterations}).`;
     } catch {
@@ -606,7 +691,88 @@ export class Agent {
       warnings: metrics?.warnings ?? [],
     };
   }
+
+  /** Phase 6: 从当前观察中提取知识并持久化 */
+  private async extractKnowledge(obs: any): Promise<void> {
+    try {
+      // 从 Notebook 决策中提取
+      const decisions = this.notebook.getData().decisions;
+      const recentDecisions = decisions.filter(d => d.stepId >= this.state.currentStep - 3);
+      for (const d of recentDecisions) {
+        const entry = this.knowledgeStore.extractFromDecision(d, undefined);
+        await this.knowledgeStore.save(entry);
+        this.logger.info("Knowledge", `Extracted decision: ${entry.content.slice(0, 60)}`);
+      }
+
+      // 从 Observation 中提取
+      const obsEntry = this.knowledgeStore.extractFromObservation({
+        summary: obs.summary,
+        keyFindings: obs.keyFindings,
+        success: obs.success,
+        severity: obs.severity,
+        stepId: this.state.currentStep,
+      }, undefined);
+      if (obsEntry) {
+        await this.knowledgeStore.save(obsEntry);
+        this.logger.info("Knowledge", `Extracted observation: ${obsEntry.content.slice(0, 60)}`);
+      }
+
+      // 刷新检索结果
+      this.knowledgeResult = await this.retrievalEngine.retrieve(
+        { goal: this.notebook.getData().goal.primary, limit: 5 },
+        this.knowledgeStore
+      );
+    } catch (err) {
+      this.logger.warn("Knowledge", `Extraction failed: ${err}`);
+    }
+  }
+
+  /**
+   * 切换能力档位（不换模型，只调参数）
+   * 
+   * 影响：温度、迭代上限、系统提示词深度
+   */
+  setCapability(level: string): void {
+    const profile = getCapabilityProfile(level);
+    this.currentCapability = profile;
+    this.config.maxIterations = profile.maxIterations;
+    if (this.llm.setTemperature) {
+      this.llm.setTemperature(profile.temperature);
+    }
+    const basePrompt = this.config.systemPrompt.split("\n\n## Mode:")[0];
+    this.config.systemPrompt = basePrompt + profile.systemPromptSuffix;
+    this.logger.info("Agent", `Capability: ${profile.label} (temp=${profile.temperature}, iter=${profile.maxIterations})`);
+  }
+
+  /** 获取当前能力档位 */
+  getCapability(): CapabilityProfile | undefined {
+    return this.currentCapability;
+  }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

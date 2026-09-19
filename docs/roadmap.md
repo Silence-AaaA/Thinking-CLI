@@ -1,4 +1,4 @@
-﻿# Thinking Agent - 学习路线图 v2.2
+# Thinking Agent - 学习路线图 v2.2
 
 > 基于"能力域"模型。详见 `docs/plans/2026-07-16-system-architecture-design.md`
 
@@ -73,7 +73,7 @@
   - 分层组装：System → Working Memory → State Snapshot → Recent History → Summary
   - Token 上限保护（超过上下文窗口自动截断）
   - 空 Working Memory 不注入（避免浪费空间）
-- [ ] **Retrieval（按需检索）** — 按需获取文件/知识，不预载（Phase 5 配合）
+- [x] **Retrieval（按需检索）** — 按需获取文件/知识，不预载（Phase 6 Retrieval Engine 完成）
 
 ### Phase 5: Planning — 任务规划 ✅
 - [x] **Task Router（任务路由）** — 判断任务应该走 DIRECT 还是 PLAN 路径
@@ -82,10 +82,33 @@
 - [x] **Dynamic Replanner（动态重规划）** — 执行中发现问题 → 调整计划
 - [x] **Recursive Decomposition（递归拆解）** — 大任务 → 子任务 → ... → 原子任务
 
-### Phase 6: Memory — 记忆系统 ⬜
-- [ ] **Session Memory** — 当前对话，自动管理
-- [ ] **Project Memory** — 当前项目（AGENTS.md 等）
-- [ ] **Long-term Memory** — 跨项目，持久化存储
+### Phase 6: Memory — Information Lifecycle ✅
+- [x] **Instruction Layer** — 层级发现 + 合并（Global / Project / Local / Managed）
+  - [x] 4 级指令源发现（Managed → Global → Project → Local）
+  - [x] 优先级反转加载（低优先级先注入，利用 recency bias）
+  - [x] 目录遍历（从根目录向 CWD 逐级发现 THINKING.md）
+  - [x] @include 指令支持（模块化指令组织 + 循环引用检测）
+- [x] **Knowledge Layer** — 跨会话持久化知识（Framework 核心）
+  - [x] Flat Storage（uuid.json 扁平存储，分类全靠 metadata）
+  - [x] KnowledgeEntry 模型（content + reason + type/scope/importance/confidence/tags）
+  - [x] index.json 索引（轻量摘要，避免全量加载）
+  - [x] Knowledge Store（存/取/删 + gc 淘汰）
+  - [x] Knowledge Extraction（规则提取：从 WM + Observation 抽取高价值条目）
+- [x] **Agent Notebook** — 运行时状态（不是 Summary，是 Runtime State）
+  - [x] 结构化字段：Goal / Plan / Step / Blocked / Decision / Observation / Worklog
+  - [x] 双阈值触发（token 增长 + tool call 计数）
+  - [x] 与 Compact 联动（Notebook 快照替代重新总结）
+  - [x] Multi-Agent 可直接共享（结构化数据，非自然语言）
+- [x] **Retrieval Engine** — 模块化检索管线
+  - [x] MetadataFilter（按 type / scope / tags 过滤）
+  - [x] RecencyFilter（按时间衰减）
+  - [x] RelevanceRanker（综合 importance * confidence * recency）
+  - [x] 可替换策略接口（未来接入 Embedding）
+- [x] **Prompt Builder** — 从 ContextAssembler 重构
+  - [x] 分层组装：Instruction + Notebook + Knowledge + History
+  - [x] Agent 类型差异化（coding / research / general）
+  - [x] 保留 AssembleReport / HistoryCheckpoint / ContextChangelog
+  - [x] Token 预算保护
 
 ### Phase 7: Reliability — 可靠性 ⬜
 - [ ] **Evaluation（评估体系）** — 成功率 / 工具准确率 / 循环次数 / 成本 / 延迟
@@ -106,7 +129,8 @@ npm run test:phase2       # Phase 2 Observation Layer 测试
 npm run test:phase3       # Phase 3 审批系统测试
 npm run test:phase3-exec  # Phase 3 执行引擎测试（State Machine + Error Taxonomy + Reflection）
 npm run test:phase4       # Phase 4 上下文工程测试（Working Memory + Compressor + Assembler）
-npm run test:all          # 全部测试
+npm run test:phase6       # Phase 6 Information Lifecycle 测试
+  npm run test:all          # 全部测试
 ```
 
 ## 文档索引
@@ -118,6 +142,7 @@ npm run test:all          # 全部测试
 | `docs/phase1-2-report.md` | Phase 1-2 完成报告 |
 | `docs/phase3-report.md` | Phase 3 审批系统报告 |
 | `docs/quickstart.md` | 快速开始 |
+| `docs/phase6-report.md` | Phase 6 Information Lifecycle 报告 |
 
 ## 项目结构
 
@@ -144,9 +169,24 @@ src/
 ├── llm/
 │   ├── types.ts              ← LLM 接口
 │   └── openai-adapter.ts     ← OpenAI 兼容实现
+├── memory/
+│   ├── instruction-layer.ts  ← 指令层级发现（Global/Project/Local/Managed）
+│   ├── knowledge-layer.ts    ← 知识持久化（flat uuid.json + reason + metadata）
+│   ├── agent-notebook.ts     ← 运行时状态（Goal/Plan/Step/Decision/Observation/Worklog）
+│   ├── retrieval-engine.ts   ← 模块化检索管线（Filter Chain + Ranker）
+│   ├── prompt-builder.ts     ← 按 Agent 类型组装最终 prompt
+│   ├── extraction-scheduler.ts ← 双阈值触发（token + tool calls）
+│   └── index.ts              ← 模块导出
 ├── utils/logger.ts           ← 结构化日志
 └── cli/index.ts              ← CLI 入口（REPL + 审批 + exec/wm/ctx/metrics/ctxdiff）
 ```
+
+
+
+
+
+
+
 
 
 

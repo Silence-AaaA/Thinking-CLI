@@ -1,4 +1,4 @@
-﻿/**
+/**
  * OpenAI 兼容 LLM 适配器
  * 
  * 【Phase 1-2 修复项】
@@ -15,12 +15,20 @@ export class OpenAIAdapter implements LLMAdapter {
   private client: OpenAI;
   private model: string;
   private maxRetries: number;
+  private temperature: number;
+  /** DeepSeek 思考模式（thinking.enabled 时输出推理过程） */
+  private thinking: boolean;
+  /** DeepSeek 推理强度 low | medium | high */
+  private reasoningEffort?: "low" | "medium" | "high";
 
   constructor(config?: {
     apiKey?: string;
     baseURL?: string;
     model?: string;
     maxRetries?: number;
+    temperature?: number;
+    thinking?: boolean;
+    reasoningEffort?: "low" | "medium" | "high";
   }) {
     this.client = new OpenAI({
       apiKey: config?.apiKey || process.env.OPENAI_API_KEY,
@@ -28,15 +36,35 @@ export class OpenAIAdapter implements LLMAdapter {
     });
     this.model = config?.model || process.env.OPENAI_MODEL || "gpt-4o";
     this.maxRetries = config?.maxRetries ?? 2;
+    this.temperature = config?.temperature ?? 0.5;
+
+    // DeepSeek 思考模式：env DEEPSEEK_THINKING=enabled|disabled（默认关闭）
+    const thinkingEnv = (process.env.DEEPSEEK_THINKING ?? "disabled").toLowerCase();
+    this.thinking = config?.thinking ?? (thinkingEnv === "enabled" || thinkingEnv === "true" || thinkingEnv === "1");
+    // DeepSeek 推理强度：env DEEPSEEK_REASONING_EFFORT=low|medium|high
+    const effortEnv = (process.env.DEEPSEEK_REASONING_EFFORT ?? "").toLowerCase();
+    this.reasoningEffort =
+      config?.reasoningEffort ??
+      (effortEnv === "low" || effortEnv === "medium" || effortEnv === "high" ? (effortEnv as "low" | "medium" | "high") : undefined);
+  }
+
+  /** 获取当前模型名 */
+  getModel(): string {
+    return this.model;
+  }
+
+  /** 动态调整温度（能力档位系统调用） */
+  setTemperature(temperature: number): void {
+    this.temperature = Math.max(0, Math.min(2, temperature));
+  }
+
+  /** 获取当前温度 */
+  getTemperature(): number {
+    return this.temperature;
   }
 
   /**
    * 【修复 ②】严格按协议规范构造消息
-   * 
-   * 关键点：
-   * - tool 消息的 tool_call_id 必须和 assistant 的 tool_calls 里的 id 完全一致
-   * - tool 消息的 content 必须是 string（不能是 object）
-   * - assistant 消息如果带 tool_calls，content 不能是 undefined（某些 provider 要求 null 或 ""）
    */
   private formatMessages(messages: Message[]): OpenAI.ChatCompletionMessageParam[] {
     return messages.map(msg => {
@@ -48,18 +76,17 @@ export class OpenAIAdapter implements LLMAdapter {
           return { role: "user" as const, content: msg.content };
         
         case "tool":
-          // 【关键】tool_call_id 必须精确匹配
           return {
             role: "tool" as const,
             tool_call_id: msg.tool_call_id,
-            content: msg.content, // 必须是 string
+            content: msg.content,
           };
         
         case "assistant":
           if (msg.tool_calls && msg.tool_calls.length > 0) {
             return {
               role: "assistant" as const,
-              content: msg.content || null, // 不能是 undefined
+              content: msg.content || null,
               tool_calls: msg.tool_calls.map(tc => ({
                 id: tc.id,
                 type: "function" as const,
@@ -91,17 +118,23 @@ export class OpenAIAdapter implements LLMAdapter {
   ): Promise<LLMResponse> {
     let lastError: Error | null = null;
 
-    // 【修复 ③】带重试的 API 调用
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
         const openaiMessages = this.formatMessages(messages);
 
+        // DeepSeek 官方格式：thinking + reasoning_effort + stream:false
+        // 参考 https://api-docs.deepseek.com (base_url: https://api.deepseek.com, model: deepseek-flash)
         const response = await this.client.chat.completions.create({
           model: this.model,
           messages: openaiMessages,
+          temperature: this.temperature,
           tools: tools as OpenAI.ChatCompletionTool[] | undefined,
           tool_choice: tools && tools.length > 0 ? "auto" : undefined,
-        });
+          stream: false,
+          // DeepSeek 专属参数（无 thinking 档位时自动省略，兼容 OpenAI）
+          ...(this.thinking ? { thinking: { type: "enabled" as const } } : {}),
+          ...(this.reasoningEffort ? { reasoning_effort: this.reasoningEffort } : {}),
+        } as OpenAI.ChatCompletionCreateParamsNonStreaming);
 
         const choice = response.choices[0];
         if (!choice) {
@@ -109,7 +142,6 @@ export class OpenAIAdapter implements LLMAdapter {
         }
         const message = choice.message;
 
-        // 解析 tool_calls
         let toolCalls: ToolCall[] = [];
         if (message.tool_calls && message.tool_calls.length > 0) {
           toolCalls = message.tool_calls
@@ -122,7 +154,6 @@ export class OpenAIAdapter implements LLMAdapter {
                   arguments: JSON.parse(tc.function.arguments),
                 };
               } catch {
-                // 【修复 ①】如果 JSON 解析失败，说明 arguments 不完整
                 throw new Error(
                   `Failed to parse tool_call arguments for "${tc.function.name}": ${tc.function.arguments}`
                 );
@@ -142,9 +173,8 @@ export class OpenAIAdapter implements LLMAdapter {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         
-        // 如果是可重试的错误（网络、rate limit），继续重试
         if (attempt < this.maxRetries && isRetryableError(lastError)) {
-          const delay = Math.pow(2, attempt) * 1000; // 指数退避
+          const delay = Math.pow(2, attempt) * 1000;
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
         }
@@ -157,9 +187,6 @@ export class OpenAIAdapter implements LLMAdapter {
   }
 }
 
-/**
- * 判断是否可重试的错误
- */
 function isRetryableError(error: Error): boolean {
   const message = error.message.toLowerCase();
   return (

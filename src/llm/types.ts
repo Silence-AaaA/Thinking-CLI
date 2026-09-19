@@ -28,4 +28,10 @@ export interface LLMAdapter {
       };
     }>
   ): Promise<LLMResponse>;
+
+  /** 可选：获取当前模型名 */
+  getModel?(): string;
+
+  /** 可选：动态调整温度（用于能力档位系统） */
+  setTemperature?(temperature: number): void;
 }

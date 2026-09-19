@@ -76,12 +76,18 @@ export function renderWelcomeInfo(opts: {
   tools: number;
   approval: boolean;
   repl: boolean;
+  capability?: string;
 }): string {
+  const capDisplay = opts.capability
+    ? `${renderCapabilityBadge(opts.capability)}`
+    : `${theme.muted("medium")} ${theme.dim("(default)")}`;
+
   const lines = [
     `${theme.primary("┌─")} ${theme.bold("Session Info")}`,
     `${theme.primary("│")}`,
     `${theme.primary("│")}  ${theme.accent("◆")} Model     : ${theme.bold(opts.model)}`,
     `${theme.primary("│")}  ${theme.accent("◆")} Tools     : ${theme.success(opts.tools.toString())} registered`,
+    `${theme.primary("│")}  ${theme.primary("◆")} Capability: ${capDisplay}`,
     `${theme.primary("│")}  ${theme.primary("◆")} Approval  : ${opts.approval ? theme.success("ON") : theme.warning("OFF")}`,
     `${theme.primary("│")}  ${theme.primary("◆")} Mode      : ${opts.repl ? theme.info("REPL") : theme.info("Task")}`,
     `${theme.primary("│")}`,
@@ -90,10 +96,64 @@ export function renderWelcomeInfo(opts: {
   return lines.join("\n");
 }
 
+/** 渲染能力档位标签 */
+export function renderCapabilityBadge(level: string): string {
+  switch (level) {
+    case "low":    return `${theme.green("●")} ${theme.bold("LOW")}    ${theme.dim("— quick & concise")}`;
+    case "medium": return `${theme.cyan("●")} ${theme.bold("MEDIUM")} ${theme.dim("— balanced")}`;
+    case "high":   return `${theme.magenta("●")} ${theme.bold("HIGH")}   ${theme.dim("— deep reasoning")}`;
+    case "max":    return `${theme.red("●")} ${theme.bold("MAX")}    ${theme.dim("— maximum power")}`;
+    default:       return theme.muted(level);
+  }
+}
+
+/** 渲染切换能力档位的确认消息 */
+export function renderCapabilitySwitch(from: string, to: string, temperature: number, iterations: number): string {
+  return [
+    ``,
+    `  ${theme.primary("◈")} ${theme.bold("Capability Switched")}`,
+    `  ${theme.muted("─".repeat(40))}`,
+    `  ${renderCapabilityBadge(from)} → ${renderCapabilityBadge(to)}`,
+    `  ${theme.dim("Temperature:")} ${theme.bold(temperature.toFixed(1))}`,
+    `  ${theme.dim("Max Iterations:")} ${theme.bold(iterations.toString())}`,
+    `  ${theme.muted("─".repeat(40))}`,
+    ``,
+  ].join("\n");
+}
+
+/** 渲染能力档位列表 */
+export function renderCapabilityList(): string {
+  const levels = ["low", "medium", "high", "max"];
+  const descriptions: Record<string, string> = {
+    low: "Quick & concise — simple questions, fast replies",
+    medium: "Balanced — daily coding tasks",
+    high: "Deep reasoning — complex refactors & architecture",
+    max: "Maximum power — hardest problems, no compromise",
+  };
+  const lines = [
+    ``,
+    `  ${gradients.aurora("◈ Capability Levels")}`,
+    `  ${theme.muted("─".repeat(44))}`,
+  ];
+  for (const level of levels) {
+    lines.push(`  ${renderCapabilityBadge(level)} ${theme.dim(descriptions[level] ?? "")}`);
+  }
+  lines.push(`  ${theme.muted("─".repeat(44))}`);
+  lines.push(`  ${theme.dim("Usage:")} ${theme.primary("cap")} ${theme.bold("<level>")} ${theme.dim("to switch")}`);
+  lines.push(``);
+  return lines.join("\n");
+}
+
 // ─── REPL 提示符 ──────────────────────────────────────────
 
-export function renderPrompt(): string {
-  return `${theme.primary("❯")} `;
+export function renderPrompt(capability?: string): string {
+  const capIcon = capability
+    ? capability === "low" ? theme.green("L")
+      : capability === "high" ? theme.magenta("H")
+      : capability === "max" ? theme.red("X")
+      : theme.cyan("M")
+    : theme.cyan("M");
+  return `${capIcon}${theme.primary("❯")} `;
 }
 
 export function renderThinking(): string {

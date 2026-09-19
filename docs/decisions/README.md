@@ -1,4 +1,4 @@
-# 决策记录索引
+﻿# 决策记录索引
 
 > 每个 Phase 的关键设计决策、为什么这么做、踩过什么坑。
 > 只记录已实现的内容，不记录规划中的。
@@ -58,3 +58,5 @@
 | [ADR-019](./ADR-019-runtime-snapshot.md) | Runtime Snapshot：checkpoint / resume / replay |
 | [ADR-020](./ADR-020-checkpoint-diff.md) | Summary Checkpoint Diff：比较 checkpoint 之间变化 |
 | [ADR-021](./ADR-021-run-report.md) | Run Report JSON 导出：标准化运行报告 |
+
+| ADR-022 | Phase 6 | ✅ Information Lifecycle（五层记忆架构：Instruction/Knowledge/Notebook/Retrieval/PromptBuilder） |
