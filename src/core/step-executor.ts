@@ -23,7 +23,6 @@
 import { getLogger } from "../utils/logger.js";
 import type { Agent } from "./agent.js";
 import type { TaskPlan, TaskStep } from "./task-planner.js";
-import type { WorkingMemory } from "./working-memory.js";
 
 /** 步骤执行结果 */
 export interface StepExecutionResult {
@@ -69,7 +68,7 @@ export class StepExecutor {
   /**
    * 执行整个计划（每步前重置执行状态）
    */
-  async executeWithReset(plan: TaskPlan, agent: Agent, memory: WorkingMemory): Promise<PlanExecutionResult> {
+  async executeWithReset(plan: TaskPlan, agent: Agent): Promise<PlanExecutionResult> {
     const startTime = Date.now();
     const stepResults: StepExecutionResult[] = [];
 

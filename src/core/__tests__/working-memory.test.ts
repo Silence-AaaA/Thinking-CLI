@@ -10,7 +10,7 @@ vi.mock("../../utils/logger.js", () => ({
   }),
 }));
 
-import type { Finding, MemorySource, WorkingMemorySnapshot } from "../working-memory.js";
+import type { MemorySource } from "../working-memory.js";
 import { WorkingMemory } from "../working-memory.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ describe("WorkingMemory", () => {
     });
 
     it("should merge with existing finding when replaceKey matches a tag", () => {
-      const f1 = wm.addFinding(makeInput({ tags: ["key-a"], strength: 5 }));
+      wm.addFinding(makeInput({ tags: ["key-a"], strength: 5 }));
       expect(wm.snapshot().findings.length).toBe(1);
 
       const f2 = wm.addFinding(
@@ -145,7 +145,7 @@ describe("WorkingMemory", () => {
 
   describe("tickStep", () => {
     it("should decay all findings by decayPerStep", () => {
-      const f = wm.addFinding(makeInput({ strength: 10 }));
+      wm.addFinding(makeInput({ strength: 10 }));
       wm.tickStep(1);
       const snap = wm.snapshot();
       expect(snap.findings[0].strength).toBe(9); // 10 - 1

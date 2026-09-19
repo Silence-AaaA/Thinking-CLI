@@ -24,7 +24,6 @@
  */
 
 import type { ToolCall, ToolResult } from "../tools/types.js";
-import { getLogger } from "../utils/logger.js";
 
 /** 9 种错误类型 */
 export enum ErrorType {
@@ -91,14 +90,11 @@ export interface ErrorClassification {
  * 高确信度直接用分类结果，低确信度可以降级到通用恢复策略。
  */
 export class ErrorTaxonomy {
-  private logger = getLogger();
-
   /**
    * 从工具结果中分类错误
    */
-  classify(toolCall: ToolCall, result: ToolResult): ErrorClassification {
+  classify(_toolCall: ToolCall, result: ToolResult): ErrorClassification {
     const errorText = (result.error ?? "").toLowerCase();
-    const toolName = toolCall.name.toLowerCase();
 
     // 1. 超时
     if (errorText.includes("timeout") || errorText.includes("timed out")) {

@@ -9,7 +9,6 @@
  */
 
 import type { ToolCall } from "../tools/types.js";
-import { getLogger } from "../utils/logger.js";
 
 export enum RiskLevel {
   READ = "READ",
@@ -33,8 +32,6 @@ export interface RiskAssessment {
 }
 
 export class RiskAssessor {
-  private logger = getLogger();
-
   assess(toolCall: ToolCall): RiskAssessment {
     const { name, arguments: args } = toolCall;
 
@@ -175,8 +172,6 @@ export class RiskAssessor {
    * 我们需要检测这种"等价危险操作"。
    */
   private detectScriptBypass(command: string): { reason: string; risks: string[] } | null {
-    const lower = command.toLowerCase();
-
     // 检测文件删除
     const deletePatterns = [
       { pattern: /os\.remove/i, reason: "Python file deletion (equivalent to rm)" },

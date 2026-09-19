@@ -23,7 +23,6 @@
  * ============================================================
  */
 
-import { getLogger } from "../utils/logger.js";
 import type { ErrorType, RecoveryAction } from "./error-taxonomy.js";
 import type { StateSnapshot, StepRecord } from "./state-machine.js";
 
@@ -88,7 +87,6 @@ export interface ReflectionJSON {
  */
 export class ReflectionEngine {
   private config: ReflectionConfig;
-  private logger = getLogger();
   private consecutiveFailures: number = 0;
   private lastToolName: string = "";
   private recoveryFailureCount: number = 0;
@@ -116,7 +114,7 @@ export class ReflectionEngine {
   /**
    * 检查是否需要反思
    */
-  check(snapshot: StateSnapshot, lastError?: { type: ErrorType; recovery: RecoveryAction }): ReflectionResult {
+  check(snapshot: StateSnapshot, _lastError?: { type: ErrorType; recovery: RecoveryAction }): ReflectionResult {
     // 条件 1: 连续失败
     const consecutiveCheck = this.checkConsecutiveFailures(snapshot);
     if (consecutiveCheck.shouldReflect) return consecutiveCheck;

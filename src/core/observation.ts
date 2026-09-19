@@ -102,7 +102,7 @@ class GenericExtractor implements ObservationExtractor {
       keyFindings: [errorText],
       success: false,
       errorType: classifyError(errorText),
-      suggestedAction: suggestRecovery(toolCall.name, errorText),
+      suggestedAction: suggestRecovery(errorText),
       tokenEstimate: 50,
       status: "error",
       severity: "medium",
@@ -327,7 +327,7 @@ class ShellExtractor implements ObservationExtractor {
         ].filter(Boolean),
         success: false,
         errorType,
-        suggestedAction: suggestShellRecovery(command, exitCode, stderr),
+        suggestedAction: suggestShellRecovery(exitCode, stderr),
         tokenEstimate: 70,
         status: "error",
         severity: inferShellSeverity(exitCode, stderr),
@@ -510,7 +510,7 @@ function inferShellSeverity(exitCode: number | undefined, stderr: string): Obser
   return "medium";
 }
 
-function suggestRecovery(toolName: string, error: string): string {
+function suggestRecovery(error: string): string {
   const errorType = classifyError(error);
   switch (errorType) {
     case "file_not_found":
@@ -526,7 +526,7 @@ function suggestRecovery(toolName: string, error: string): string {
   }
 }
 
-function suggestShellRecovery(command: string, exitCode: number | undefined, stderr: string): string {
+function suggestShellRecovery(exitCode: number | undefined, stderr: string): string {
   if (exitCode === 124) return "Command timed out. Try with a longer timeout or break into smaller steps.";
   if (exitCode === 127) return "Command not found. Check if it's installed.";
   if (stderr.includes("No such file")) return "File or directory not found. Check the path.";

@@ -27,7 +27,6 @@ import { HistoryCheckpointManager } from "../core/history-checkpoints.js";
 import { HistoryCompressor } from "../core/history-compressor.js";
 import type { StateMachine } from "../core/state-machine.js";
 import type { Message } from "../llm/types.js";
-import { getLogger } from "../utils/logger.js";
 import type { AgentNotebookData } from "./agent-notebook.js";
 import type { InstructionContext } from "./instruction-layer.js";
 import type { RetrievalResult } from "./retrieval-engine.js";
@@ -129,7 +128,6 @@ export class PromptBuilder {
   private lastInjectedKnowledge = false;
   private lastCompressedMessages = 0;
   private lastDroppedForBudget = 0;
-  private logger = getLogger();
 
   constructor(config?: Partial<PromptBuilderConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };

@@ -41,7 +41,7 @@ Use this to understand what changes are pending.`,
       },
     },
   },
-  execute: async (params): Promise<ToolResult> => {
+  execute: async (_params): Promise<ToolResult> => {
     try {
       const branchResult = await gitExec("rev-parse --abbrev-ref HEAD");
       const branch = branchResult.stdout.trim();

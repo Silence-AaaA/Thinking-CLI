@@ -15,7 +15,7 @@
  */
 
 import { getLogger } from "../utils/logger.js";
-import type { IndexEntry, KnowledgeEntry, KnowledgeScope, KnowledgeStore, KnowledgeType } from "./knowledge-layer.js";
+import type { KnowledgeEntry, KnowledgeScope, KnowledgeStore, KnowledgeType } from "./knowledge-layer.js";
 
 // ============================================================
 // 类型定义

@@ -18,9 +18,9 @@
  * ============================================================
  */
 
-import type { Observation, ObservationSeverity, ObservationStatus } from "../core/observation.js";
+import type { ObservationSeverity } from "../core/observation.js";
 import type { ReflectionResult } from "../core/reflection.js";
-import type { StateMachine, StateSnapshot } from "../core/state-machine.js";
+import type { StateMachine } from "../core/state-machine.js";
 import type { TaskPlan } from "../core/task-planner.js";
 import { getLogger } from "../utils/logger.js";
 

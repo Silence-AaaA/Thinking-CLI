@@ -22,18 +22,20 @@ import {
   PromptBuilder,
   RetrievalEngine,
 } from "../memory/index.js";
+import type { RetrievalResult } from "../memory/retrieval-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { ToolCall } from "../tools/types.js";
 import { getLogger } from "../utils/logger.js";
 import { type ApprovalCallback, ApprovalGateway } from "./approval-gateway.js";
 import { ContextAssembler } from "./context-assembler.js";
 import { ErrorTaxonomy, RecoveryAction } from "./error-taxonomy.js";
+import type { Observation } from "./observation.js";
 import { ObservationManager } from "./observation.js";
 import { ReflectionEngine, type ReflectionJSON } from "./reflection.js";
 import { RuntimeMetrics } from "./runtime-metrics.js";
 import { ExecutionStatus, StateMachine } from "./state-machine.js";
 import { type PlanExecutionResult, StepExecutor } from "./step-executor.js";
-import { type TaskPlan, TaskPlanner } from "./task-planner.js";
+import { TaskPlanner } from "./task-planner.js";
 import type { TaskRouter } from "./task-router.js";
 import { WorkingMemory } from "./working-memory.js";
 
@@ -170,13 +172,13 @@ export class Agent {
   private promptBuilder!: PromptBuilder;
   private extractionScheduler!: ExtractionScheduler;
   private currentCwd!: string;
-  private knowledgeResult: {
-    entries: any[];
-    scores: Map<string, number>;
-    strategy: string;
-    totalCandidates: number;
-    filteredCount: number;
-  } = { entries: [], scores: new Map(), strategy: "none", totalCandidates: 0, filteredCount: 0 };
+  private knowledgeResult: RetrievalResult = {
+    entries: [],
+    scores: new Map<string, number>(),
+    strategy: "none",
+    totalCandidates: 0,
+    filteredCount: 0,
+  };
 
   constructor(llm: LLMAdapter, tools: ToolRegistry, config?: AgentConfig) {
     this.llm = llm;
@@ -221,12 +223,6 @@ export class Agent {
       totalTokens: 0,
       toolCallHistory: [],
     };
-  }
-
-  /** 生成项目路径的稳定 hash（用于知识存储隔离） */
-  private hashPath(p: string): string {
-    // using imported createHash
-    return nodeCreateHash("sha256").update(p).digest("hex").slice(0, 12);
   }
 
   private truncateToolOutput(output: string, maxChars: number): string {
@@ -662,7 +658,7 @@ export class Agent {
     const plan = await this.taskPlanner.plan(goal, this.workingMemory);
 
     // Phase 2: 逐步执行（每步前重置执行状态，保留 Working Memory）
-    let result = await this.stepExecutor.executeWithReset(plan, this, this.workingMemory);
+    let result = await this.stepExecutor.executeWithReset(plan, this);
 
     // Phase 3: 如果有失败步骤，尝试重规划一次
     if (result.finalStatus !== "completed") {
@@ -678,7 +674,7 @@ export class Agent {
             lastFailed.result ?? "Step failed",
             this.workingMemory,
           );
-          result = await this.stepExecutor.executeWithReset(newPlan, this, this.workingMemory);
+          result = await this.stepExecutor.executeWithReset(newPlan, this);
         } catch (e) {
           this.logger.warn("Agent", `Replan failed: ${e}`);
         }
@@ -722,7 +718,7 @@ export class Agent {
   }
 
   /** Phase 6: 从当前观察中提取知识并持久化 */
-  private async extractKnowledge(obs: any): Promise<void> {
+  private async extractKnowledge(obs: Observation): Promise<void> {
     try {
       // 从 Notebook 决策中提取
       const decisions = this.notebook.getData().decisions;

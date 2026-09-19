@@ -98,7 +98,7 @@ export class ExtractionScheduler {
   /**
    * 记录 token 数变化
    */
-  recordTokenCount(count: number): void {
+  recordTokenCount(_count: number): void {
     // 只用于外部跟踪，不影响 shouldExtract 的判断
   }
 
